@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Club {
+  id               Int       @id @default(autoincrement())
+  externalId       String?   @unique
+  name             String
+  shortName        String?
+  league           String    @default("Unknown")
+  country          String    @default("Unknown")
+  logoUrl          String?
+  autoCreated      Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  players          Player[]
+  rumoursFrom      Rumour[]  @relation("FromClub")
+  rumoursTo        Rumour[]  @relation("ToClub")
+
+  @@map("clubs")
+}
+
+model Player {
+  id              Int       @id @default(autoincrement())
+  externalId      String?   @unique
+  name            String
+  age             Int?
+  position        Position?
+  currentClubId   Int?
+  contractEnd     DateTime?
+  marketValue     Float?    // in millions EUR
+  nationality     String?
+  photoUrl        String?
+  autoCreated     Boolean   @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  currentClub     Club?     @relation(fields: [currentClubId], references: [id])
+  rumours         Rumour[]
+
+  @@map("players")
+}
+
+model Source {
+  id               Int       @id @default(autoincrement())
+  name             String    @unique
+  type             SourceType
+  reliabilityScore Float     @default(0.5) // 0.0 – 1.0
+  country          String?
+  url              String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  rumours          Rumour[]
+
+  @@map("sources")
+}
+
+model Rumour {
+  id                  Int           @id @default(autoincrement())
+  externalId          String?       @unique
+  playerId            Int
+  fromClubId          Int
+  toClubId            Int
+  sourceId            Int
+  reportedFeeMin      Float?        // millions EUR
+  reportedFeeMax      Float?
+  currency            String        @default("EUR")
+  rumourDate          DateTime      @default(now())
+  window              TransferWindow
+  baseProbability     Float         @default(0.5) // raw from provider
+  computedLikelihood  Float         @default(0)   // 0–100, from scoring engine
+  status              RumourStatus  @default(PENDING)
+  distinctSourceCount Int           @default(1)
+  notes               String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  player    Player  @relation(fields: [playerId], references: [id])
+  fromClub  Club    @relation("FromClub", fields: [fromClubId], references: [id])
+  toClub    Club    @relation("ToClub", fields: [toClubId], references: [id])
+  source    Source  @relation(fields: [sourceId], references: [id])
+
+  history   RumourHistory[]
+
+  @@map("rumours")
+}
+
+// Append-only log of likelihood changes — powers the timeline chart
+model RumourHistory {
+  id                 Int      @id @default(autoincrement())
+  rumourId           Int
+  computedLikelihood Float
+  status             RumourStatus
+  recordedAt         DateTime @default(now())
+
+  rumour Rumour @relation(fields: [rumourId], references: [id])
+
+  @@index([rumourId, recordedAt])
+  @@map("rumour_history")
+}
+
+// Raw ingest log — every headline seen, matched or not.
+// Powers future NLP training set and audit trail.
+model RawSignal {
+  id                  Int       @id @default(autoincrement())
+  sourceName          String
+  feedUrl             String
+  headline            String
+  summary             String    @db.Text
+  link                String
+  publishedAt         DateTime
+  rawText             String    @db.Text
+  impliedReliability  Float?
+  matched             Boolean   @default(false)
+  rumourId            Int?
+  createdAt           DateTime  @default(now())
+
+  @@index([sourceName, publishedAt])
+  @@index([matched])
+  @@map("raw_signals")
+}
+
+enum Position {
+  GK
+  CB
+  LB
+  RB
+  CDM
+  CM
+  CAM
+  LM
+  RM
+  LW
+  RW
+  ST
+  CF
+}
+
+enum SourceType {
+  JOURNALIST
+  CLUB_OFFICIAL
+  AGENT
+  NEWS_OUTLET
+  SOCIAL_MEDIA
+  AGGREGATOR
+}
+
+enum TransferWindow {
+  SUMMER
+  WINTER
+  FREE_AGENT
+}
+
+enum RumourStatus {
+  PENDING
+  HOT        // likelihood > 70
+  COMPLETED
+  FAILED
+  DENIED
+}

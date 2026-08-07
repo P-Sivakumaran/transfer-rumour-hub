@@ -1,0 +1,25 @@
+{
+  "name": "transfer-rumour-hub",
+  "private": true,
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "migrate": "npm run migrate --workspace=backend",
+    "seed": "npm run seed --workspace=backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "dependencies": {
+    "bullmq": "^6.0.9",
+    "iconv-lite": "^0.4.24",
+    "ioredis": "^6.0.0",
+    "rss-parser": "^3.13.0"
+  }
+}
