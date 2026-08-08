@@ -20,6 +20,8 @@ export type EnrichJobData = {
   playerName: string
 }
 
+export type PlayerSyncJobData = Record<string, never>
+
 const defaultOpts = { connection: createRedisConnection() }
 
 export const ingestQueue = new Queue<IngestJobData>('ingest', {
@@ -56,5 +58,17 @@ export const enrichQueue = new Queue<EnrichJobData>('enrich', {
     backoff: { type: 'exponential', delay: 30_000 }, // back off on rate-limit
     removeOnComplete: 200,
     removeOnFail: 100,
+  },
+})
+
+// Separate from ingestQueue (concurrency 3) so two overlapping player-sync
+// runs can never race on the adopt-by-name reconciliation step.
+export const playerSyncQueue = new Queue<PlayerSyncJobData>('player-sync', {
+  ...defaultOpts,
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 60_000 },
+    removeOnComplete: 20,
+    removeOnFail: 20,
   },
 })

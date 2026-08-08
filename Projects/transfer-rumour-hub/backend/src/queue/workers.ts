@@ -3,7 +3,7 @@ import { PrismaClient, RumourStatus, SourceType } from '@prisma/client'
 import { createRedisConnection } from './connection.js'
 import {
   scoreQueue, dedupeQueue, enrichQueue,
-  type IngestJobData, type ScoreJobData, type DedupeJobData, type EnrichJobData,
+  type IngestJobData, type ScoreJobData, type DedupeJobData, type EnrichJobData, type PlayerSyncJobData,
 } from './queues.js'
 import { fetchLatestRumours } from '../ingestion/sportmonks.js'
 import { fetchRSSSignals, RSS_FEEDS } from '../ingestion/sources/rss.js'
@@ -13,6 +13,7 @@ import { computeScore } from '../scoring/likelihoodEngine.js'
 import { broadcast } from '../sse/broadcaster.js'
 import { detectOutcome, applyOutcome } from '../ingestion/outcomeDetector.js'
 import { runPlayerEnrichment } from '../ingestion/enrichment.js'
+import { runPlayerClubSyncWithPrisma } from '../ingestion/playerClubSync.js'
 
 const prisma = new PrismaClient()
 
@@ -375,6 +376,13 @@ async function processEnrich(job: { data: EnrichJobData }) {
   await runPlayerEnrichment(playerId, playerName, prisma)
 }
 
+async function processPlayerSync(_job: { data: PlayerSyncJobData }) {
+  console.log('[worker:player-sync] starting')
+  const result = await runPlayerClubSyncWithPrisma(prisma)
+  console.log(`[worker:player-sync] done — clubs=${result.clubs} players=${result.players}`)
+  return result
+}
+
 // ─── Start all workers ──────────────────────────────────────────────────────
 
 export function startWorkers(): void {
@@ -383,5 +391,7 @@ export function startWorkers(): void {
   new Worker<ScoreJobData>('score', processScore as any, { connection: conn, concurrency: 10 })
   new Worker<DedupeJobData>('dedupe', processDedupe as any, { connection: conn, concurrency: 2 })
   new Worker<EnrichJobData>('enrich', processEnrich as any, { connection: conn, concurrency: 1 }) // 1 at a time to be polite to Wikidata
-  console.log('[workers] Ingest, score, dedupe, enrich workers started.')
+  // concurrency 1 — a second overlapping run could race on the adopt-by-name reconciliation step
+  new Worker<PlayerSyncJobData>('player-sync', processPlayerSync as any, { connection: conn, concurrency: 1 })
+  console.log('[workers] Ingest, score, dedupe, enrich, player-sync workers started.')
 }

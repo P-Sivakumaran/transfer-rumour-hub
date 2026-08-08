@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { PrismaClient, RumourStatus } from '@prisma/client'
 import { applyOutcome } from '../ingestion/outcomeDetector.js'
-import { enrichQueue } from '../queue/queues.js'
+import { enrichQueue, playerSyncQueue } from '../queue/queues.js'
 import { broadcast } from '../sse/broadcaster.js'
 import { z } from 'zod'
 
@@ -51,6 +51,13 @@ router.post('/players/:id/enrich', async (req, res) => {
 
   await enrichQueue.add('enrich', { playerId: id, playerName: player.name })
   res.json({ queued: true, playerId: id, playerName: player.name })
+})
+
+// POST /admin/players/sync — trigger a Sportmonks squad sync on demand
+// (testing without waiting for the daily schedule)
+router.post('/players/sync', async (_req, res) => {
+  const job = await playerSyncQueue.add('player-sync-manual', {})
+  res.json({ queued: true, jobId: job.id })
 })
 
 // GET /admin/rumours?status=PENDING — list rumours filtered by status (for review)

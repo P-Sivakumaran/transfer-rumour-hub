@@ -48,7 +48,7 @@ export interface NormalizedRumour {
 
 // ─── Client ───────────────────────────────────────────────────────────────
 
-function createAxiosClient(): AxiosInstance {
+export function createAxiosClient(): AxiosInstance {
   return axios.create({
     baseURL: process.env.SPORTMONKS_BASE_URL ?? 'https://api.sportmonks.com/v3/football',
     headers: {
