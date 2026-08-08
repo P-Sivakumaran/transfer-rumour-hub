@@ -22,7 +22,7 @@ import { invalidateEntityCache } from './entityMatcher.js'
 export interface SyncDb {
   club: {
     findFirst(args: any): Promise<{ id: number } | null>
-    findMany(args: any): Promise<{ id: number }[]>
+    findMany(args: any): Promise<{ id: number; name: string }[]>
     update(args: any): Promise<unknown>
     create(args: any): Promise<{ id: number }>
   }
@@ -32,6 +32,21 @@ export interface SyncDb {
     update(args: any): Promise<unknown>
     create(args: any): Promise<{ id: number }>
   }
+}
+
+// Club names vary in punctuation between sources ("Paris Saint-Germain" vs
+// Sportmonks' "Paris Saint Germain") — a byte-exact match missed this and
+// created a duplicate instead of adopting the seed row (found by testing
+// against a real key). Normalize hyphens/punctuation/whitespace/case before
+// comparing. Deliberately not applied to player names — no evidence of the
+// same problem there yet, and diacritics carry real meaning in a person's
+// name in a way punctuation mostly doesn't in a club name.
+function normaliseClubName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[-.,'’`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 export async function upsertClub(db: SyncDb, nc: NormalizedClub): Promise<number> {
@@ -44,11 +59,14 @@ export async function upsertClub(db: SyncDb, nc: NormalizedClub): Promise<number
     return byExternalId.id
   }
 
-  // Match by name alone, not `externalId: null` — seed data already has
-  // non-null externalIds in its own namespace ('MCI', 'P001', ...), and those
-  // rows are exactly the ones that most need adopting, not just auto-created
-  // rows that happen to have a null externalId.
-  const adoptable = await db.club.findMany({ where: { name: nc.name } })
+  // Scan all clubs (table stays small — low hundreds at most) rather than an
+  // exact-name query, so punctuation/case variants still match. Not
+  // `externalId: null` either — seed data already has non-null externalIds
+  // in its own namespace ('MCI', 'P001', ...), and those rows are exactly
+  // the ones that most need adopting, not just rows with a null externalId.
+  const allClubs = await db.club.findMany({ where: {} })
+  const target = normaliseClubName(nc.name)
+  const adoptable = allClubs.filter((c: { name: string }) => normaliseClubName(c.name) === target)
   if (adoptable.length === 1) {
     await db.club.update({
       where: { id: adoptable[0].id },

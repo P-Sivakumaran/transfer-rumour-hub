@@ -10,8 +10,19 @@
  * — a domestic-league plan would need different league IDs, but the
  * endpoint/response shapes should carry over.
  */
+import axios from 'axios'
 import { z } from 'zod'
 import { createAxiosClient } from './sportmonks.js'
+
+// createAxiosClient()'s baseURL is scoped to /v3/football (SPORTMONKS_BASE_URL),
+// but country lookups live at the top-level /v3/core/countries, not
+// /v3/football/core/countries — using the football-scoped client 404s on
+// every single call (found via a real sync: 100% failure rate, not the
+// transient blip it first looked like).
+function coreBaseUrl(): string {
+  const footballBase = process.env.SPORTMONKS_BASE_URL ?? 'https://api.sportmonks.com/v3/football'
+  return footballBase.replace(/\/football\/?$/, '/core')
+}
 
 export type Position = 'GK' | 'CB' | 'LB' | 'RB' | 'CDM' | 'CM' | 'CAM' | 'LM' | 'RM' | 'LW' | 'RW' | 'ST' | 'CF'
 
@@ -136,12 +147,21 @@ async function resolveCountryName(countryId: number | null): Promise<string> {
   if (cached) return cached
 
   try {
-    const client = createAxiosClient()
-    const { data: response } = await client.get(`/core/countries/${countryId}`)
+    const { data: response } = await axios.get(`${coreBaseUrl()}/countries/${countryId}`, {
+      params: { api_token: process.env.SPORTMONKS_API_KEY ?? '' },
+      timeout: 10_000,
+    })
     const parsed = SportmonksCountrySchema.parse(response)
     countryNameCache.set(countryId, parsed.data.name)
+    await delay(80)
     return parsed.data.name
-  } catch {
+  } catch (err) {
+    // Log rather than swallow — silently returning 'Unknown' here is what let
+    // the wrong-base-URL bug (see coreBaseUrl()) hide as data noise for a
+    // whole sync run instead of surfacing immediately. Not caching the
+    // failure, so a transient error gets retried on the next call for the
+    // same country rather than sticking as 'Unknown' for the rest of the run.
+    console.warn(`[sportmonksCatalog] Failed to resolve country ${countryId}:`, (err as Error).message)
     return 'Unknown'
   }
 }
@@ -200,11 +220,33 @@ export async function fetchLeagueCatalog(): Promise<{ clubs: NormalizedClub[]; p
     return { clubs: [], players: [] }
   }
 
-  const clubs: NormalizedClub[] = []
+  const rawClubs: NormalizedClub[] = []
   for (const leagueId of Object.keys(TARGET_LEAGUES)) {
-    clubs.push(...(await fetchLeagueTeams(leagueId)))
+    rawClubs.push(...(await fetchLeagueTeams(leagueId)))
     await delay(250)
   }
+
+  // A team can appear in more than one target competition (e.g. UEFA Super
+  // Cup finalists are also that season's Champions/Europa League entrants).
+  // Found via a real sync: without deduping, whichever competition happened
+  // to be processed last silently overwrote the club's league/country —
+  // Paris Saint-Germain ended up with league="UEFA Super Cup",
+  // country="Unknown" purely because Super Cup was processed after
+  // Champions League and that pass's country lookup came back empty.
+  // Merging also avoids squad-fetching the same team twice.
+  const clubsByExternalId = new Map<string, NormalizedClub>()
+  for (const c of rawClubs) {
+    const existing = clubsByExternalId.get(c.externalId)
+    if (!existing) {
+      clubsByExternalId.set(c.externalId, { ...c })
+      continue
+    }
+    const leagues = new Set(existing.league.split(', '))
+    leagues.add(c.league)
+    existing.league = [...leagues].join(', ')
+    if (existing.country === 'Unknown' && c.country !== 'Unknown') existing.country = c.country
+  }
+  const clubs = [...clubsByExternalId.values()]
 
   const players: NormalizedPlayer[] = []
   for (const club of clubs) {

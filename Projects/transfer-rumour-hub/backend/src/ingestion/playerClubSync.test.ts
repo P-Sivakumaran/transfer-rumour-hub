@@ -64,6 +64,25 @@ describe('upsertClub', () => {
     expect(club.rows[0].externalId).toBe('sm-club-9')
   })
 
+  it('adopts across a punctuation mismatch instead of duplicating (regression: real Sportmonks data)', async () => {
+    const seedPsg: Row = { id: 1, externalId: 'PSG', name: 'Paris Saint-Germain', shortName: 'PSG', league: 'Ligue 1', country: 'France' }
+    const { db, club } = makeFakeDb([seedPsg], [])
+    const incoming: NormalizedClub = {
+      externalId: 'sm-club-591',
+      name: 'Paris Saint Germain', // Sportmonks — no hyphen
+      shortName: 'PSG',
+      league: 'Champions League',
+      country: 'France',
+      logoUrl: null,
+    }
+
+    const id = await upsertClub(db, incoming)
+
+    expect(id).toBe(seedPsg.id)
+    expect(club.rows).toHaveLength(1)
+    expect(club.rows[0].externalId).toBe('sm-club-591')
+  })
+
   it('updates in place on a repeat sync (externalId already matches)', async () => {
     const { db, club } = makeFakeDb([{ ...SEED_CLUB, externalId: 'sm-club-9' }], [])
     const incoming: NormalizedClub = {
