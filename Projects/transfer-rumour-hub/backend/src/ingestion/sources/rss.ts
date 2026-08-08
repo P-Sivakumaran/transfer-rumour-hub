@@ -79,7 +79,7 @@ export async function fetchRSSSignals(
 }
 
 export const RSS_FEEDS: Array<{ url: string; name: string; defaultReliability: number }> = [
-  // Direct journalism sources — highest reliability
+  // Direct journalism — highest reliability
   {
     url: 'https://www.skysports.com/rss/12040',
     name: 'Sky Sports Transfers',
@@ -90,7 +90,22 @@ export const RSS_FEEDS: Array<{ url: string; name: string; defaultReliability: n
     name: 'BBC Sport',
     defaultReliability: 0.80,
   },
-  // Google News aggregator — wide sweep across all outlets
+  {
+    url: 'https://www.theguardian.com/football/rss',
+    name: 'The Guardian Football',
+    defaultReliability: 0.75,
+  },
+  {
+    url: 'https://www.espn.com/espn/rss/soccer/news',
+    name: 'ESPN Soccer',
+    defaultReliability: 0.72,
+  },
+  {
+    url: 'https://www.marca.com/en/rss/football.xml',
+    name: 'Marca Football',
+    defaultReliability: 0.70,
+  },
+  // Google News — wide sweep across all outlets
   {
     url: 'https://news.google.com/rss/search?q=football+transfer+rumour&hl=en-GB&gl=GB&ceid=GB:en',
     name: 'Google News Transfers',
@@ -101,11 +116,16 @@ export const RSS_FEEDS: Array<{ url: string; name: string; defaultReliability: n
     name: 'Google News Here We Go',
     defaultReliability: 0.88, // "here we go" = Romano signal
   },
+  {
+    url: 'https://news.google.com/rss/search?q=transfer+confirmed+football&hl=en-GB&gl=GB&ceid=GB:en',
+    name: 'Google News Confirmed',
+    defaultReliability: 0.82, // "confirmed" signals = outcome detector fuel
+  },
   // Community tier-tagged sources
   {
     url: 'https://www.reddit.com/r/footballtransfers/new.rss',
     name: 'Reddit Transfers',
-    defaultReliability: 0.45, // tier extracted per-post when available
+    defaultReliability: 0.45,
   },
   {
     url: 'https://www.reddit.com/r/soccer/search.rss?q=transfer+rumour&sort=new',

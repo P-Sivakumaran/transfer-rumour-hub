@@ -93,6 +93,8 @@ export function invalidateEntityCache(): void {
   cache = null
 }
 
+export { getEntities }
+
 // ─── Match functions ────────────────────────────────────────────────────────
 
 const MATCH_THRESHOLD = 0.80

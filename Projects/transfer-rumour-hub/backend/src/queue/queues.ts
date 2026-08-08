@@ -15,6 +15,11 @@ export type DedupeJobData = {
   newRumourId: number
 }
 
+export type EnrichJobData = {
+  playerId: number
+  playerName: string
+}
+
 const defaultOpts = { connection: createRedisConnection() }
 
 export const ingestQueue = new Queue<IngestJobData>('ingest', {
@@ -41,5 +46,15 @@ export const dedupeQueue = new Queue<DedupeJobData>('dedupe', {
   defaultJobOptions: {
     attempts: 2,
     removeOnComplete: 100,
+  },
+})
+
+export const enrichQueue = new Queue<EnrichJobData>('enrich', {
+  ...defaultOpts,
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 30_000 }, // back off on rate-limit
+    removeOnComplete: 200,
+    removeOnFail: 100,
   },
 })

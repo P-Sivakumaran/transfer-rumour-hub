@@ -72,3 +72,28 @@ export interface PaginatedResponse<T> {
   page: number
   limit: number
 }
+
+export interface AdminRumour {
+  id: number
+  computedLikelihood: number
+  status: RumourStatus
+  contradicts: number | null
+  rumourDate: string
+  notes: string | null
+  player: { name: string }
+  fromClub: { name: string }
+  toClub: { name: string }
+  source: { name: string; reliabilityScore: number }
+}
+
+export interface AdminSource {
+  id: number
+  name: string
+  type: SourceType
+  reliabilityScore: number
+  hitCount: number
+  missCount: number
+  country: string | null
+  url: string | null
+  _count: { rumours: number }
+}

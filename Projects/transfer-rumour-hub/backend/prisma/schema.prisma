@@ -38,6 +38,8 @@ model Player {
   nationality     String?
   photoUrl        String?
   autoCreated     Boolean   @default(false)
+  wikidataId      String?   // Wikidata entity QID (e.g. "Q59306386")
+  enrichedAt      DateTime? // when Wikidata enrichment last ran
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -52,6 +54,8 @@ model Source {
   name             String    @unique
   type             SourceType
   reliabilityScore Float     @default(0.5) // 0.0 – 1.0
+  hitCount         Int       @default(0)   // rumours that completed
+  missCount        Int       @default(0)   // rumours that failed/denied
   country          String?
   url              String?
   createdAt        DateTime  @default(now())
@@ -79,6 +83,7 @@ model Rumour {
   status              RumourStatus  @default(PENDING)
   distinctSourceCount Int           @default(1)
   notes               String?
+  contradicts         Int?          // id of a conflicting rumour (same player, different destination)
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -87,7 +92,9 @@ model Rumour {
   toClub    Club    @relation("ToClub", fields: [toClubId], references: [id])
   source    Source  @relation(fields: [sourceId], references: [id])
 
-  history   RumourHistory[]
+  contradictsRel  Rumour?  @relation("RumourContradiction", fields: [contradicts], references: [id])
+  contradictedBy  Rumour[] @relation("RumourContradiction")
+  history         RumourHistory[]
 
   @@map("rumours")
 }
