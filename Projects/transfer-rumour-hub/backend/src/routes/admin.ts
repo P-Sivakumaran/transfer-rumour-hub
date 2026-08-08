@@ -54,6 +54,8 @@ router.post('/players/:id/enrich', async (req, res) => {
 })
 
 // GET /admin/rumours?status=PENDING — list rumours filtered by status (for review)
+// Evidence (the source articles) is attached to each row so a status change
+// is always made against visible source text, not a bare likelihood number.
 router.get('/rumours', async (req, res) => {
   const status = req.query.status as RumourStatus | undefined
   const where = status && Object.values(RumourStatus).includes(status) ? { status } : {}
@@ -68,7 +70,24 @@ router.get('/rumours', async (req, res) => {
       source: { select: { name: true, reliabilityScore: true } },
     },
   })
-  res.json(rumours)
+
+  const rumourIds = rumours.map((r) => r.id)
+  const evidenceRows = rumourIds.length
+    ? await prisma.rawSignal.findMany({
+        where: { rumourId: { in: rumourIds } },
+        orderBy: { publishedAt: 'desc' },
+        select: { rumourId: true, sourceName: true, headline: true, link: true, publishedAt: true },
+      })
+    : []
+
+  const evidenceByRumour = new Map<number, typeof evidenceRows>()
+  for (const row of evidenceRows) {
+    const list = evidenceByRumour.get(row.rumourId!) ?? []
+    list.push(row)
+    evidenceByRumour.set(row.rumourId!, list)
+  }
+
+  res.json(rumours.map((r) => ({ ...r, evidence: evidenceByRumour.get(r.id) ?? [] })))
 })
 
 export default router

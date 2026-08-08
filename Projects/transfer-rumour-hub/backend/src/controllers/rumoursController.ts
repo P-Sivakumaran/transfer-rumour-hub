@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express'
 import { z } from 'zod'
-import { listRumours, getRumourById, getRumourHistory } from '../services/rumoursService.js'
+import { listRumours, getRumourById, getRumourHistory, getRumourEvidence } from '../services/rumoursService.js'
 import { RumourStatus } from '@prisma/client'
 
 const ListQuerySchema = z.object({
@@ -26,6 +26,6 @@ export async function handleGetRumour(req: Request, res: Response): Promise<void
     res.status(404).json({ error: 'Rumour not found' })
     return
   }
-  const history = await getRumourHistory(id)
-  res.json({ ...rumour, history })
+  const [history, evidence] = await Promise.all([getRumourHistory(id), getRumourEvidence(id)])
+  res.json({ ...rumour, history, evidence })
 }

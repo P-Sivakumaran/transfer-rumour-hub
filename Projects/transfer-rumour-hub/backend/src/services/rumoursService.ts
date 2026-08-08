@@ -75,3 +75,16 @@ export async function getRumourHistory(
     select: { computedLikelihood: true, recordedAt: true },
   })
 }
+
+// The raw articles that produced or corroborated this rumour — surfaced so a
+// status (PENDING/COMPLETED/...) is always traceable back to source text,
+// not a bare number or an unaccountable manual click.
+export async function getRumourEvidence(id: number): Promise<
+  { sourceName: string; headline: string; link: string; publishedAt: Date }[]
+> {
+  return prisma.rawSignal.findMany({
+    where: { rumourId: id },
+    orderBy: { publishedAt: 'desc' },
+    select: { sourceName: true, headline: true, link: true, publishedAt: true },
+  })
+}

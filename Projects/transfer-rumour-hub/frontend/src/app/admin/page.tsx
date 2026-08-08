@@ -93,51 +93,79 @@ function RumoursPanel() {
         {rumours.map((r) => (
           <div
             key={r.id}
-            className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-700/60 bg-slate-800/60 p-3"
+            className="flex flex-col gap-3 rounded-xl border border-slate-700/60 bg-slate-800/60 p-3"
           >
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-semibold text-white">{r.player.name}</span>
-                <StatusBadge status={r.status} />
-                {r.contradicts !== null && (
-                  <span className="rounded-full border border-amber-500/40 bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-400">
-                    contradicts #{r.contradicts}
-                  </span>
-                )}
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-white">{r.player.name}</span>
+                  <StatusBadge status={r.status} />
+                  {r.contradicts !== null && (
+                    <span className="rounded-full border border-amber-500/40 bg-amber-500/20 px-2 py-0.5 text-xs font-semibold text-amber-400">
+                      contradicts #{r.contradicts}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-400">
+                  <span>{r.fromClub.name}</span>
+                  <span className="text-slate-600">→</span>
+                  <span>{r.toClub.name}</span>
+                  <span className="text-slate-600">·</span>
+                  <span className="font-mono">{Math.round(r.computedLikelihood)}%</span>
+                  <span className="text-slate-600">·</span>
+                  <span>{r.source.name} ({Math.round(r.source.reliabilityScore * 100)}%)</span>
+                </div>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-slate-400">
-                <span>{r.fromClub.name}</span>
-                <span className="text-slate-600">→</span>
-                <span>{r.toClub.name}</span>
-                <span className="text-slate-600">·</span>
-                <span className="font-mono">{Math.round(r.computedLikelihood)}%</span>
-                <span className="text-slate-600">·</span>
-                <span>{r.source.name} ({Math.round(r.source.reliabilityScore * 100)}%)</span>
+
+              <div className="flex gap-2">
+                <button
+                  disabled={pendingId === r.id || r.evidence.length === 0}
+                  title={r.evidence.length === 0 ? 'No source evidence found for this rumour — cannot set outcome' : undefined}
+                  onClick={() => setOutcome(r.id, 'COMPLETED')}
+                  className="rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-400 transition-colors hover:bg-green-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Completed
+                </button>
+                <button
+                  disabled={pendingId === r.id || r.evidence.length === 0}
+                  title={r.evidence.length === 0 ? 'No source evidence found for this rumour — cannot set outcome' : undefined}
+                  onClick={() => setOutcome(r.id, 'FAILED')}
+                  className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Failed
+                </button>
+                <button
+                  disabled={pendingId === r.id || r.evidence.length === 0}
+                  title={r.evidence.length === 0 ? 'No source evidence found for this rumour — cannot set outcome' : undefined}
+                  onClick={() => setOutcome(r.id, 'DENIED')}
+                  className="rounded-lg border border-gray-500/40 bg-gray-500/10 px-3 py-1.5 text-xs font-semibold text-gray-400 transition-colors hover:bg-gray-500/20 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+                  Denied
+                </button>
               </div>
             </div>
 
-            <div className="flex gap-2">
-              <button
-                disabled={pendingId === r.id}
-                onClick={() => setOutcome(r.id, 'COMPLETED')}
-                className="rounded-lg border border-green-500/40 bg-green-500/10 px-3 py-1.5 text-xs font-semibold text-green-400 transition-colors hover:bg-green-500/20 disabled:opacity-50"
-              >
-                Completed
-              </button>
-              <button
-                disabled={pendingId === r.id}
-                onClick={() => setOutcome(r.id, 'FAILED')}
-                className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-1.5 text-xs font-semibold text-red-400 transition-colors hover:bg-red-500/20 disabled:opacity-50"
-              >
-                Failed
-              </button>
-              <button
-                disabled={pendingId === r.id}
-                onClick={() => setOutcome(r.id, 'DENIED')}
-                className="rounded-lg border border-gray-500/40 bg-gray-500/10 px-3 py-1.5 text-xs font-semibold text-gray-400 transition-colors hover:bg-gray-500/20 disabled:opacity-50"
-              >
-                Denied
-              </button>
+            {/* Evidence — every action above must be traceable to one of these */}
+            <div className="border-t border-slate-700/60 pt-2">
+              {r.evidence.length === 0 ? (
+                <p className="text-xs text-slate-500">No source articles linked — outcome cannot be set manually.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {r.evidence.map((e, i) => (
+                    <li key={i} className="flex items-center gap-1.5 text-xs">
+                      <span className="text-slate-500">{e.sourceName}:</span>
+                      <a
+                        href={e.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate text-pitch-500 hover:underline"
+                      >
+                        {e.headline}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           </div>
         ))}

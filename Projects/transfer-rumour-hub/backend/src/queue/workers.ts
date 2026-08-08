@@ -150,6 +150,8 @@ async function processIngest(job: { data: IngestJobData }) {
       const sourceId = await ensureSource(sourceName, reliability)
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
+      let matchedRumourId: number | null = null
+
       for (const candidate of candidates) {
         const existing = await prisma.rumour.findFirst({
           where: {
@@ -161,6 +163,7 @@ async function processIngest(job: { data: IngestJobData }) {
         })
 
         if (existing) {
+          matchedRumourId = existing.id
           await prisma.rumour.update({
             where: { id: existing.id },
             data: { distinctSourceCount: { increment: 1 } },
@@ -188,6 +191,7 @@ async function processIngest(job: { data: IngestJobData }) {
               status: RumourStatus.PENDING,
             },
           })
+          matchedRumourId = rumour.id
           await scoreQueue.add('score', { rumourId: rumour.id })
 
           // Apply outcome explicitly so hitCount/reliability are credited
@@ -233,7 +237,7 @@ async function processIngest(job: { data: IngestJobData }) {
       if (candidates.length > 0) {
         await prisma.rawSignal.update({
           where: { id: raw.id },
-          data: { matched: true },
+          data: { matched: true, rumourId: matchedRumourId },
         })
       }
     }

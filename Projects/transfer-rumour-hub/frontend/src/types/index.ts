@@ -55,8 +55,16 @@ export interface RumourHistoryPoint {
   recordedAt: string
 }
 
+export interface EvidenceItem {
+  sourceName: string
+  headline: string
+  link: string
+  publishedAt: string
+}
+
 export interface RumourDetail extends Rumour {
   history: RumourHistoryPoint[]
+  evidence: EvidenceItem[]
 }
 
 export interface ClubDetail extends Club {
@@ -84,6 +92,7 @@ export interface AdminRumour {
   fromClub: { name: string }
   toClub: { name: string }
   source: { name: string; reliabilityScore: number }
+  evidence: EvidenceItem[]
 }
 
 export interface AdminSource {

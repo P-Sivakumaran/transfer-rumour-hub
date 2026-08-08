@@ -74,6 +74,32 @@ export default async function RumourDetailPage({ params }: { params: { id: strin
           <p className="text-slate-300 text-sm leading-relaxed">{rumour.notes}</p>
         </div>
       )}
+
+      {/* Evidence — the articles this rumour and its status are actually based on */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
+        <p className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-2">Evidence</p>
+        {rumour.evidence.length === 0 ? (
+          <p className="text-sm text-slate-500">No source articles linked to this rumour yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {rumour.evidence.map((e, i) => (
+              <li key={i} className="text-sm">
+                <a
+                  href={e.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-pitch-500 hover:underline"
+                >
+                  {e.headline}
+                </a>
+                <span className="ml-2 text-xs text-slate-500">
+                  {e.sourceName} · {new Date(e.publishedAt).toLocaleDateString()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   )
 }

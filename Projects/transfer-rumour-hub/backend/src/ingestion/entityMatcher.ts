@@ -211,12 +211,18 @@ interface CandidateName {
   extractionConfidence: number
 }
 
+// A leading possessive ("Inter's Pio Esposito") is a club owning/scouting the
+// player, not part of their name — the apostrophe-continuation in NAME_WORD
+// (needed for real names like "N'Golo" or "D'Ambrosio") also happens to match
+// this. Strip a leading "X's " before validating the candidate.
+const LEADING_POSSESSIVE = /^\p{Lu}[\p{L}]*'s\s+/u
+
 function extractCandidateNames(text: string): CandidateName[] {
   const found = new Map<string, number>()
   for (const pattern of PLAYER_EXTRACTION_PATTERNS) {
     const m = text.match(pattern)
     if (!m || !m[1]) continue
-    const name = m[1].trim()
+    const name = m[1].trim().replace(LEADING_POSSESSIVE, '')
     if (!isProperName(name)) continue
     const base = 0.90 - PLAYER_EXTRACTION_PATTERNS.indexOf(pattern) * 0.02
     found.set(name, Math.max(found.get(name) ?? 0, base))
@@ -298,7 +304,12 @@ const FROM_PREPOSITIONS = [' from ', ' leaves ', ' leave ', ' departs ', ' exits
 // be nearest in the lookahead window, which is not necessarily the real
 // destination.
 const TO_INFINITIVE_VERBS =
-  /^(leave|leaves|join|joins|sign|signs|complete|completes|become|becomes|move|moves|head|heads|make|makes)\b/i
+  /^(leave|leaves|join|joins|sign|signs|complete|completes|become|becomes|move|moves|head|heads|make|makes|watch|watching|monitor|monitoring|scout|scouting|track|tracking|assess|assessing)\b/i
+
+// "Reports/news/sources **from** X" attributes the story to a publication,
+// not a transfer origin — the same bare " from " cue that catches a real
+// "signs from Club" also matches this unrelated construction.
+const FROM_ATTRIBUTION_PRECEDING = /\b(reports?|news|sources?|according)\s*$/i
 
 // Only assigns a from/to club when the text gives an explicit directional cue
 // ("joins X", "from Y") near a club mention. When neither slot resolves this
@@ -342,6 +353,7 @@ function resolveDirection(
     for (const prep of FROM_PREPOSITIONS) {
       const idx = lower.indexOf(prep)
       if (idx === -1) continue
+      if (prep === ' from ' && FROM_ATTRIBUTION_PRECEDING.test(lower.slice(Math.max(0, idx - 20), idx))) continue
       const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
       const best = findBestClub(afterPrep, clubs)
       if (best) { fromClub = { id: best.id, name: best.name, score: best.score }; break }
