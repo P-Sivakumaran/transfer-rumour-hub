@@ -164,18 +164,23 @@ function isProperName(candidate: string): boolean {
   const words = candidate.trim().split(/\s+/)
   if (words.length < 2 || words.length > 3) return false
   if (candidate.length < 5 || candidate.length > 35) return false
-  if (!words.every((w) => /^[A-ZÁÉÍÓÚÑÇÜ]/.test(w))) return false
+  if (!words.every((w) => /^\p{Lu}/u.test(w))) return false
   if (words.some((w) => STOP_NAMES.has(w))) return false
   if (CLUB_SUFFIXES.test(candidate)) return false
   if (/\d/.test(candidate)) return false
   return true
 }
 
+// \p{L} (unicode "Letter") covers all diacritics (ã, õ, ø, ß...) — a plain
+// [a-záéíóúñçü] class silently truncates names like "Guimarães" at the ã.
+const NAME_WORD = `\\p{Lu}[\\p{L}'-]+`
+const NAME = `${NAME_WORD}(?:\\s${NAME_WORD}){1,2}`
+
 const PLAYER_EXTRACTION_PATTERNS = [
-  /^([A-Z][a-záéíóúñçüÄÖÜ]+(?:\s[A-Z][a-záéíóúñçüÄÖÜ'-]+){1,2})\s+(?:to|joins?|signs? for|moves? to|heading to|completes? move to|set to join)/,
-  /(?:sign(?:s|ed)?|target(?:s|ed)?|eye(?:s|d)?|want(?:s|ed)?|bid(?:s)? for|keen on|chase(?:s|d)?|linked with|interested in|approach(?:ed)?|agree(?:s|d)? deal for|complete(?:s|d)? signing of)\s+([A-Z][a-záéíóúñçüÄÖÜ]+(?:\s[A-Z][a-záéíóúñçüÄÖÜ'-]+){1,2})/,
-  /([A-Z][a-záéíóúñçüÄÖÜ]+(?:\s[A-Z][a-záéíóúñçüÄÖÜ'-]+){1,2})\s+(?:completes?|confirms?|announces?|agrees?|passes? medical|here we go)/,
-  /[:\-–]\s+([A-Z][a-záéíóúñçüÄÖÜ]+(?:\s[A-Z][a-záéíóúñçüÄÖÜ'-]+){1,2})\s+(?:to|joins?|signs?)/,
+  new RegExp(`^(${NAME})\\s+(?:to|joins?|signs? for|moves? to|heading to|completes? move to|set to join)`, 'u'),
+  new RegExp(`(?:sign(?:s|ed)?|target(?:s|ed)?|eye(?:s|d)?|want(?:s|ed)?|bid(?:s)? for|keen on|chase(?:s|d)?|linked with|interested in|approach(?:ed)?|agree(?:s|d)? deal for|complete(?:s|d)? signing of)\\s+(${NAME})`, 'u'),
+  new RegExp(`(${NAME})\\s+(?:completes?|confirms?|announces?|agrees?|passes? medical|here we go)`, 'u'),
+  new RegExp(`[:\\-–]\\s+(${NAME})\\s+(?:to|joins?|signs?)`, 'u'),
 ]
 
 interface CandidateName {
@@ -264,21 +269,25 @@ async function autoCreateClub(name: string): Promise<number | null> {
 const TO_PREPOSITIONS = [' to ', ' joins ', ' signs for ', ' moves to ', ' heading to ']
 const FROM_PREPOSITIONS = [' from ', ' leaves ', ' departs ', ' exits ']
 
+// Only assigns a from/to club when the text gives an explicit directional cue
+// ("joins X", "from Y") near a club mention. When neither slot resolves this
+// way, we return null rather than guess from mention order — a rumour with a
+// fabricated direction is worse than no rumour.
 function resolveDirection(
   lower: string,
   text: string,
   clubs: EntityCache['clubs'],
   mentionedClubs: Array<{ id: number; name: string; score: number }>,
-): { fromClub: (typeof mentionedClubs)[0]; toClub: (typeof mentionedClubs)[0] } {
-  let fromClub = mentionedClubs[0]
-  let toClub = mentionedClubs[1]
+): { fromClub: (typeof mentionedClubs)[0] | null; toClub: (typeof mentionedClubs)[0] | null } {
+  let fromClub: (typeof mentionedClubs)[0] | null = null
+  let toClub: (typeof mentionedClubs)[0] | null = null
 
   for (const prep of TO_PREPOSITIONS) {
     const idx = lower.indexOf(prep)
     if (idx === -1) continue
     const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
     const best = findBestClub(afterPrep, clubs)
-    if (best) toClub = { id: best.id, name: best.name, score: best.score }
+    if (best) { toClub = { id: best.id, name: best.name, score: best.score }; break }
   }
 
   for (const prep of FROM_PREPOSITIONS) {
@@ -286,7 +295,15 @@ function resolveDirection(
     if (idx === -1) continue
     const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
     const best = findBestClub(afterPrep, clubs)
-    if (best) fromClub = { id: best.id, name: best.name, score: best.score }
+    if (best) { fromClub = { id: best.id, name: best.name, score: best.score }; break }
+  }
+
+  // Exactly two clubs in play and only one side resolved explicitly — the
+  // other slot is unambiguous by elimination (e.g. "signs for Chelsea" with
+  // the old club named earlier but not via an explicit "from" phrase).
+  if (mentionedClubs.length === 2) {
+    if (toClub && !fromClub) fromClub = mentionedClubs.find((c) => c.id !== toClub!.id) ?? null
+    if (fromClub && !toClub) toClub = mentionedClubs.find((c) => c.id !== fromClub!.id) ?? null
   }
 
   return { fromClub, toClub }
@@ -323,19 +340,32 @@ export async function extractRumoursFromText(
     const playerScore = similarity(player.name, text)
     if (playerScore < 0.75) continue
 
+    // Scope club matching to the text around the player's mention rather than
+    // the whole article — otherwise any club namedropped anywhere in a long
+    // summary (e.g. an unrelated pundit aside) gets treated as part of this
+    // player's transfer. Falls back to the full text if we can't locate the
+    // raw (possibly-accented) last name verbatim.
+    const rawLastName = player.name.trim().split(/\s+/).pop() ?? ''
+    const mentionIdx = rawLastName ? lower.indexOf(rawLastName.toLowerCase()) : -1
+    const windowText =
+      mentionIdx === -1
+        ? text
+        : text.slice(Math.max(0, mentionIdx - 150), Math.min(text.length, mentionIdx + rawLastName.length + 150))
+    const windowLower = windowText.toLowerCase()
+
     const mentionedClubs: Array<{ id: number; name: string; score: number }> = []
     for (const club of clubs) {
       const clubScore = Math.max(
-        similarity(text, club.name),
-        club.shortName ? similarity(text, club.shortName) : 0,
+        similarity(windowText, club.name),
+        club.shortName ? similarity(windowText, club.shortName) : 0,
       )
       if (clubScore >= MATCH_THRESHOLD) mentionedClubs.push({ ...club, score: clubScore })
     }
 
     if (mentionedClubs.length < 2) continue
 
-    const { fromClub, toClub } = resolveDirection(lower, text, clubs, mentionedClubs)
-    if (fromClub.id === toClub.id) continue
+    const { fromClub, toClub } = resolveDirection(windowLower, windowText, clubs, mentionedClubs)
+    if (!fromClub || !toClub || fromClub.id === toClub.id) continue
 
     results.push({
       playerId: player.id,
@@ -413,7 +443,7 @@ export async function extractRumoursFromText(
       freshClubs,
       mentionedClubs,
     )
-    if (fromClub.id === toClub.id) continue
+    if (!fromClub || !toClub || fromClub.id === toClub.id) continue
 
     results.push({
       playerId: newPlayerId,

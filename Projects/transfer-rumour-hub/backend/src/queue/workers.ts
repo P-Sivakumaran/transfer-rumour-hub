@@ -117,6 +117,14 @@ async function processIngest(job: { data: IngestJobData }) {
     const enrichedPlayers = new Set<number>() // avoid duplicate enrich jobs per batch
 
     for (const signal of signals) {
+      // 0. Skip feed items we've already ingested — RSS feeds re-serve the same
+      // ~20-50 items on every poll, and without this check every cron tick
+      // re-runs entity extraction on identical text, flooding rumours with dupes.
+      if (signal.link) {
+        const alreadySeen = await prisma.rawSignal.findFirst({ where: { link: signal.link } })
+        if (alreadySeen) continue
+      }
+
       // 1. Persist raw signal
       const raw = await prisma.rawSignal.create({
         data: {

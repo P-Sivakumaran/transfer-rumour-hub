@@ -131,6 +131,7 @@ model RawSignal {
 
   @@index([sourceName, publishedAt])
   @@index([matched])
+  @@index([link])
   @@map("raw_signals")
 }
 
