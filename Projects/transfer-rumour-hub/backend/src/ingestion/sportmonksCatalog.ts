@@ -4,72 +4,90 @@
  * and upsertNormalizedRumour() have real externalIds to match against,
  * instead of relying on regex-extracted, auto-created guesses.
  *
- * Docs: https://docs.sportmonks.com/football
- *
- * IMPORTANT: the league IDs, endpoint paths and response shapes below are
- * NOT verified against a live account — Sportmonks squad/roster endpoints
- * are commonly gated behind a higher plan tier than /transfers, and exact
- * v3 request/response shapes should be confirmed against real docs or one
- * real call per endpoint before trusting this file with a live key.
+ * League IDs, endpoint shapes, and the position-id taxonomy below were
+ * verified against a live account (2026-08-09), not guessed. That account's
+ * plan is scoped to UEFA club competitions specifically (see TARGET_LEAGUES)
+ * — a domestic-league plan would need different league IDs, but the
+ * endpoint/response shapes should carry over.
  */
 import { z } from 'zod'
 import { createAxiosClient } from './sportmonks.js'
 
 export type Position = 'GK' | 'CB' | 'LB' | 'RB' | 'CDM' | 'CM' | 'CAM' | 'LM' | 'RM' | 'LW' | 'RW' | 'ST' | 'CF'
 
-// TODO: verify these against Sportmonks' /leagues listing for your account —
-// numeric IDs vary by provider and are not safe to assume from memory.
+// Verified via GET /leagues against the live key — this account's plan is
+// "Euro Club Tournaments", scoped to exactly these 4 competitions.
 const TARGET_LEAGUES: Record<string, string> = {
-  '8': 'Premier League',
-  '564': 'La Liga',
-  '82': 'Bundesliga',
-  '384': 'Serie A',
-  '301': 'Ligue 1',
+  '2': 'Champions League',
+  '5': 'Europa League',
+  '1328': 'UEFA Super Cup',
+  '2286': 'Europa Conference League',
 }
 
-// TODO: verify against the real position taxonomy returned by the squad
-// endpoint (`include=position`) — these numeric IDs are placeholders.
-const POSITION_ID_MAP: Record<number, Position> = {
+// Verified via GET /core/types/{id} for every id observed in real squad
+// responses across several clubs. Sportmonks' `detailed_position_id` covers
+// 12 of our 13 positions directly; goalkeepers have no detailed variant and
+// carry the same id (24) at both position_id and detailed_position_id.
+// "Secondary Striker" (163) is a best-effort match to CF — Sportmonks'
+// taxonomy doesn't distinguish ST/CF as cleanly as this app's enum does.
+const DETAILED_POSITION_MAP: Record<number, Position> = {
   24: 'GK',
-  25: 'CB',
-  26: 'LB',
-  27: 'RB',
-  28: 'CDM',
-  29: 'CM',
-  30: 'CAM',
-  31: 'LM',
-  32: 'RM',
-  33: 'LW',
-  34: 'RW',
-  35: 'ST',
-  36: 'CF',
+  148: 'CB',
+  149: 'CDM',
+  150: 'CAM',
+  151: 'ST',
+  152: 'LW',
+  153: 'CM',
+  154: 'RB',
+  155: 'LB',
+  156: 'RW',
+  157: 'LM',
+  158: 'RM',
+  163: 'CF',
 }
 
-// ─── Provider response shapes (TODO: verify field names against live payloads) ──
+// ─── Provider response shapes (verified against live payloads) ─────────────
 
 const SportmonksTeamSchema = z.object({
   id: z.number(),
   name: z.string(),
   short_code: z.string().nullable(),
   image_path: z.string().nullable(),
-  country: z.object({ name: z.string() }).nullable().optional(),
+  country_id: z.number().nullable(),
 })
 
-const SportmonksTeamsResponseSchema = z.object({
-  data: z.array(SportmonksTeamSchema),
+const SportmonksLeagueTeamsResponseSchema = z.object({
+  data: z.object({
+    currentseason: z
+      .object({
+        teams: z.array(SportmonksTeamSchema),
+      })
+      .nullable(),
+  }),
 })
 
-const SportmonksSquadPlayerSchema = z.object({
-  id: z.number(),
-  display_name: z.string(),
-  date_of_birth: z.string().nullable(),
+const SportmonksCountrySchema = z.object({
+  data: z.object({ name: z.string() }),
+})
+
+// A squad "membership" record — player identity/DOB/nationality only appear
+// when `include=player.nationality` is passed (verified; without it, only
+// player_id/position_id/contract dates come back).
+const SportmonksSquadMemberSchema = z.object({
+  player_id: z.number(),
   position_id: z.number().nullable(),
-  image_path: z.string().nullable(),
-  nationality: z.object({ name: z.string() }).nullable().optional(),
+  detailed_position_id: z.number().nullable(),
+  player: z.object({
+    id: z.number(),
+    display_name: z.string(),
+    date_of_birth: z.string().nullable(),
+    image_path: z.string().nullable(),
+    nationality: z.object({ name: z.string() }).nullable(),
+  }),
 })
 
 const SportmonksSquadResponseSchema = z.object({
-  data: z.array(SportmonksSquadPlayerSchema),
+  data: z.array(SportmonksSquadMemberSchema),
 })
 
 // ─── Normalized shapes ──────────────────────────────────────────────────────
@@ -100,11 +118,32 @@ function ageFromDob(dob: string | null): number | null {
   return new Date().getFullYear() - birthDate.getFullYear()
 }
 
-// Polite delay between the ~105 sequential calls a full sync makes — the
-// /transfers pagination loop in sportmonks.ts has no delay because that
-// endpoint is much lower volume than a full 5-league squad crawl.
+// Polite delay between the ~250-450 sequential calls a full sync makes
+// (4 league calls + one per team across ~240 teams) — the /transfers
+// pagination loop in sportmonks.ts has no delay because that endpoint is
+// much lower volume than a full competition-wide squad crawl.
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+// Countries repeat heavily across teams in the same competition — cache
+// resolved names for the lifetime of a single sync run.
+const countryNameCache = new Map<number, string>()
+
+async function resolveCountryName(countryId: number | null): Promise<string> {
+  if (countryId === null) return 'Unknown'
+  const cached = countryNameCache.get(countryId)
+  if (cached) return cached
+
+  try {
+    const client = createAxiosClient()
+    const { data: response } = await client.get(`/core/countries/${countryId}`)
+    const parsed = SportmonksCountrySchema.parse(response)
+    countryNameCache.set(countryId, parsed.data.name)
+    return parsed.data.name
+  } catch {
+    return 'Unknown'
+  }
 }
 
 async function fetchLeagueTeams(leagueId: string): Promise<NormalizedClub[]> {
@@ -113,36 +152,45 @@ async function fetchLeagueTeams(leagueId: string): Promise<NormalizedClub[]> {
   const { data: response } = await client.get(`/leagues/${leagueId}`, {
     params: { include: 'currentSeason.teams' },
   })
-  const parsed = SportmonksTeamsResponseSchema.parse(response)
-  return parsed.data.map((t) => ({
-    externalId: `sm-club-${t.id}`,
-    name: t.name,
-    shortName: t.short_code,
-    league,
-    country: t.country?.name ?? 'Unknown',
-    logoUrl: t.image_path,
-  }))
+  const parsed = SportmonksLeagueTeamsResponseSchema.parse(response)
+  const teams = parsed.data.currentseason?.teams ?? []
+
+  const clubs: NormalizedClub[] = []
+  for (const t of teams) {
+    clubs.push({
+      externalId: `sm-club-${t.id}`,
+      name: t.name,
+      shortName: t.short_code,
+      league,
+      country: await resolveCountryName(t.country_id),
+      logoUrl: t.image_path,
+    })
+  }
+  return clubs
 }
 
 async function fetchTeamSquad(teamExternalId: string): Promise<Omit<NormalizedPlayer, 'currentClubExternalId'>[]> {
   const client = createAxiosClient()
   const teamId = teamExternalId.replace('sm-club-', '')
   const { data: response } = await client.get(`/squads/teams/${teamId}`, {
-    params: { include: 'position;nationality' },
+    params: { include: 'player.nationality' },
   })
   const parsed = SportmonksSquadResponseSchema.parse(response)
-  return parsed.data.map((p) => ({
-    externalId: `sm-player-${p.id}`,
-    name: p.display_name,
-    age: ageFromDob(p.date_of_birth),
-    position: p.position_id ? (POSITION_ID_MAP[p.position_id] ?? null) : null,
-    nationality: p.nationality?.name ?? null,
-    photoUrl: p.image_path,
-  }))
+  return parsed.data.map((m) => {
+    const positionId = m.detailed_position_id ?? m.position_id
+    return {
+      externalId: `sm-player-${m.player.id}`,
+      name: m.player.display_name,
+      age: ageFromDob(m.player.date_of_birth),
+      position: positionId ? (DETAILED_POSITION_MAP[positionId] ?? null) : null,
+      nationality: m.player.nationality?.name ?? null,
+      photoUrl: m.player.image_path,
+    }
+  })
 }
 
 /**
- * Fetches every club + player across the target leagues. Returns empty
+ * Fetches every club + player across the target competitions. Returns empty
  * arrays (never throws) if SPORTMONKS_API_KEY is unset, matching the
  * offline-stub pattern used by fetchLatestRumours() in sportmonks.ts.
  */

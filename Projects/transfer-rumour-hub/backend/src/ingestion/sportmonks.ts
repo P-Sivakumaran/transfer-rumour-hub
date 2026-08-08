@@ -49,10 +49,14 @@ export interface NormalizedRumour {
 // ─── Client ───────────────────────────────────────────────────────────────
 
 export function createAxiosClient(): AxiosInstance {
+  // Sportmonks v3 authenticates via an `api_token` query param, not a Bearer
+  // header — verified against a live key (a Bearer header gets a 401 even
+  // with a valid token). Set as an axios default param so every request
+  // picks it up without repeating it at each call site.
   return axios.create({
     baseURL: process.env.SPORTMONKS_BASE_URL ?? 'https://api.sportmonks.com/v3/football',
-    headers: {
-      Authorization: `Bearer ${process.env.SPORTMONKS_API_KEY ?? ''}`,
+    params: {
+      api_token: process.env.SPORTMONKS_API_KEY ?? '',
     },
     timeout: 10_000,
   })
