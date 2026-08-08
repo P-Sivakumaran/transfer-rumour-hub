@@ -31,11 +31,19 @@ function levenshtein(a: string, b: string): number {
   return dp[a.length][b.length]
 }
 
+// Whole-token containment: does `needle` appear in `haystack` as a standalone
+// word/phrase, not as a run of characters inside a longer word. Without this,
+// a short club nickname like "Inter" false-matches inside "interest".
+function containsWholeToken(haystack: string, needle: string): boolean {
+  if (!needle) return false
+  return new RegExp(`(?:^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\s|$)`).test(haystack)
+}
+
 function similarity(a: string, b: string): number {
   const na = normalise(a)
   const nb = normalise(b)
   if (na === nb) return 1
-  if (nb.includes(na) || na.includes(nb)) return 0.92
+  if (containsWholeToken(nb, na) || containsWholeToken(na, nb)) return 0.92
   const maxLen = Math.max(na.length, nb.length)
   if (maxLen === 0) return 1
   return 1 - levenshtein(na, nb) / maxLen
@@ -100,17 +108,32 @@ export { getEntities }
 const MATCH_THRESHOLD = 0.80
 const AUTO_CREATE_THRESHOLD = 0.85
 
+// Picks the closest qualifying club to the start of `text`, not just the
+// highest-scoring one. Callers pass a short slice right after a directional
+// preposition ("... from X", "... to Y") that can still contain a second,
+// later club mention (headline+summary concatenation repeats names) — without
+// a proximity tie-break, an unrelated later mention with an equal exact-match
+// score can beat the club that's actually adjacent to the preposition.
 function findBestClub(text: string, clubs: EntityCache['clubs']) {
   const resolved = resolveAlias(text)
-  let best = { id: -1, name: '', score: 0 }
+  const normalisedText = normalise(text)
+  let best: { id: number; name: string; score: number; pos: number } | null = null
   for (const c of clubs) {
-    const score = Math.max(
-      similarity(resolved, c.name),
-      c.shortName ? similarity(resolved, c.shortName) : 0,
-    )
-    if (score > best.score) best = { id: c.id, name: c.name, score }
+    const nameScore = similarity(resolved, c.name)
+    const shortScore = c.shortName ? similarity(resolved, c.shortName) : 0
+    const usingShort = shortScore > nameScore
+    const score = usingShort ? shortScore : nameScore
+    if (score < MATCH_THRESHOLD) continue
+
+    const label = usingShort ? c.shortName! : c.name
+    const rawPos = normalisedText.indexOf(normalise(label))
+    const pos = rawPos === -1 ? Infinity : rawPos
+
+    if (!best || pos < best.pos || (pos === best.pos && score > best.score)) {
+      best = { id: c.id, name: c.name, score, pos }
+    }
   }
-  return best.score >= MATCH_THRESHOLD ? best : null
+  return best
 }
 
 // Returns raw best score without threshold — used to detect near-misses
@@ -267,7 +290,15 @@ async function autoCreateClub(name: string): Promise<number | null> {
 // ─── Direction resolution ────────────────────────────────────────────────────
 
 const TO_PREPOSITIONS = [' to ', ' joins ', ' signs for ', ' moves to ', ' heading to ']
-const FROM_PREPOSITIONS = [' from ', ' leaves ', ' departs ', ' exits ']
+const FROM_PREPOSITIONS = [' from ', ' leaves ', ' leave ', ' departs ', ' exits ']
+
+// Verbs that commonly follow a bare " to " as an infinitive marker rather
+// than a destination ("Romero **to leave** Spurs for Arsenal") — without this
+// guard, findBestClub scans past the verb and grabs whatever club happens to
+// be nearest in the lookahead window, which is not necessarily the real
+// destination.
+const TO_INFINITIVE_VERBS =
+  /^(leave|leaves|join|joins|sign|signs|complete|completes|become|becomes|move|moves|head|heads|make|makes)\b/i
 
 // Only assigns a from/to club when the text gives an explicit directional cue
 // ("joins X", "from Y") near a club mention. When neither slot resolves this
@@ -282,20 +313,39 @@ function resolveDirection(
   let fromClub: (typeof mentionedClubs)[0] | null = null
   let toClub: (typeof mentionedClubs)[0] | null = null
 
-  for (const prep of TO_PREPOSITIONS) {
-    const idx = lower.indexOf(prep)
-    if (idx === -1) continue
-    const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
-    const best = findBestClub(afterPrep, clubs)
-    if (best) { toClub = { id: best.id, name: best.name, score: best.score }; break }
+  // "leave X for Y" — very common transfer-journalism phrasing where X is the
+  // origin and Y (after "for") is the destination. Resolved first because the
+  // generic " to " cue below would otherwise misfire on "PLAYER **to** leave".
+  const leaveIdx = lower.search(/\bleaves?\b/)
+  if (leaveIdx !== -1) {
+    const forIdx = lower.indexOf(' for ', leaveIdx)
+    if (forIdx !== -1 && forIdx - leaveIdx < 80) {
+      const leaveClub = findBestClub(text.slice(leaveIdx, forIdx), clubs)
+      const forClub = findBestClub(text.slice(forIdx + 5, forIdx + 5 + 40), clubs)
+      if (leaveClub) fromClub = { id: leaveClub.id, name: leaveClub.name, score: leaveClub.score }
+      if (forClub) toClub = { id: forClub.id, name: forClub.name, score: forClub.score }
+    }
   }
 
-  for (const prep of FROM_PREPOSITIONS) {
-    const idx = lower.indexOf(prep)
-    if (idx === -1) continue
-    const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
-    const best = findBestClub(afterPrep, clubs)
-    if (best) { fromClub = { id: best.id, name: best.name, score: best.score }; break }
+  if (!toClub) {
+    for (const prep of TO_PREPOSITIONS) {
+      const idx = lower.indexOf(prep)
+      if (idx === -1) continue
+      const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
+      if (prep === ' to ' && TO_INFINITIVE_VERBS.test(afterPrep)) continue
+      const best = findBestClub(afterPrep, clubs)
+      if (best) { toClub = { id: best.id, name: best.name, score: best.score }; break }
+    }
+  }
+
+  if (!fromClub) {
+    for (const prep of FROM_PREPOSITIONS) {
+      const idx = lower.indexOf(prep)
+      if (idx === -1) continue
+      const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
+      const best = findBestClub(afterPrep, clubs)
+      if (best) { fromClub = { id: best.id, name: best.name, score: best.score }; break }
+    }
   }
 
   // Exactly two clubs in play and only one side resolved explicitly — the
