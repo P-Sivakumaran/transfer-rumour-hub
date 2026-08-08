@@ -127,9 +127,26 @@ Without a key the ingestion module returns stub rumours automatically.
 ## Roadmap to MVP
 
 - [ ] Auth (NextAuth.js) — user watchlists and notifications
-- [ ] SSE hook in frontend — live TruthMeter updates without page refresh
-- [ ] Admin panel — manually set rumour status (COMPLETED / FAILED)
+- [x] SSE hook in frontend — live TruthMeter updates without page refresh
+- [x] Admin panel — manually set rumour status (COMPLETED / FAILED / DENIED), gated on linked source evidence
 - [ ] ML scoring service — Python FastAPI + scikit-learn RandomForest trained on historic outcomes
 - [ ] More competitions — Champions League, World Cup transfers
 - [ ] Rumour sourcing — scrape additional providers (Football Italia, L'Equipe)
 - [ ] Mobile app — React Native sharing the same API
+- [x] Source reliability, outcome detection, contradiction linking (auto hit/miss scoring per source)
+- [x] Wikidata player enrichment (nationality/position/age for auto-created players)
+- [x] Ads (placeholder slots) + £0.99 remove-ads one-time payment via Stripe
+- [ ] Sportmonks player/club catalog sync — code complete, needs a real API key (see below)
+
+## Picking this up in a new session
+
+Everything below is code-complete but blocked on external accounts/keys that weren't available this session. All of it degrades gracefully (clear errors, offline no-ops) without them — nothing is broken, it just isn't live yet.
+
+1. **Payments (`backend/src/routes/billing.ts`)** — set a real `STRIPE_SECRET_KEY` in `backend/.env` (test key is fine: dashboard.stripe.com/test/apikeys) to make the "Remove ads — £0.99" flow actually work. Until then `POST /billing/checkout-session` returns a clean 501.
+
+2. **Player/club sync (`backend/src/ingestion/sportmonksCatalog.ts`, `playerClubSync.ts`)** — set `SPORTMONKS_API_KEY` to populate real players/clubs for the top 5 leagues (currently only ~4 seeded players exist, so most rumour matching still falls back to regex-extraction from headlines). Before trusting this against a real key:
+   - Confirm the account's plan actually includes squad/roster endpoints (often gated above the `/transfers` tier already in use).
+   - Verify the league IDs in `TARGET_LEAGUES` and the endpoint paths/response shapes against live Sportmonks v3 docs — they're placeholders marked `TODO: verify`, not confirmed values.
+   - Run `POST /admin/players/sync` to trigger a sync on demand instead of waiting for the daily schedule, then check `players`/`clubs` row counts and spot-check that seeded rows (`externalId: 'P001'`, `'MCI'`, ...) got adopted rather than duplicated.
+
+3. **Rumour data quality** — if the `rumours` table ever looks untrustworthy again (wrong club pairings, duplicates, fabricated entities), start by reading `backend/src/ingestion/entityMatcher.ts` top-to-bottom — several rounds of real bugs were found and fixed there by tracing actual ingested headlines through `extractRumoursFromText()` rather than guessing, e.g. via a throwaway `tsx` script. The dev DB can be reset to a clean state at any time with the wipe-and-reseed sequence in git history (see commits `2185235`, `fb1f4b6`, `354f9cb`) — delete `rumour_history`/`rumours`/`raw_signals`/auto-created players+clubs, reset source `hitCount`/`missCount`/`reliabilityScore`, restart the backend to re-ingest.
