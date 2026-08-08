@@ -1,8 +1,10 @@
 import { Suspense } from 'react'
+import { cookies } from 'next/headers'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 import FilterBar from '@/components/FilterBar'
 import LiveRumourFeed from '@/components/LiveRumourFeed'
+import RemoveAdsBanner from '@/components/RemoveAdsBanner'
 import type { RumourStatus, TransferWindow } from '@/types'
 
 interface SearchParams {
@@ -27,9 +29,11 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
 
   const stats = await api.stats.overview()
   const totalPages = Math.ceil(total / limit)
+  const adsEnabled = !cookies().get('ads_removed')
 
   return (
     <div className="space-y-8">
+      {adsEnabled && <RemoveAdsBanner />}
       {/* Hero stats */}
       <div className="grid grid-cols-3 gap-4">
         {[
@@ -65,7 +69,7 @@ export default async function HomePage({ searchParams }: { searchParams: SearchP
       </section>
 
       {/* Live feed */}
-      <LiveRumourFeed initialRumours={rumours} total={total} />
+      <LiveRumourFeed initialRumours={rumours} total={total} adsEnabled={adsEnabled} />
 
       {/* Pagination */}
       {totalPages > 1 && (

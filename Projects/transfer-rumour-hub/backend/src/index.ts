@@ -10,6 +10,7 @@ import clubsRouter from './routes/clubs.js'
 import statsRouter from './routes/stats.js'
 import graphRouter from './routes/graph.js'
 import adminRouter from './routes/admin.js'
+import billingRouter from './routes/billing.js'
 import { addClient, clientCount } from './sse/broadcaster.js'
 import { startWorkers } from './queue/workers.js'
 import { scheduleRecurringJobs } from './queue/scheduler.js'
@@ -27,6 +28,7 @@ app.use('/clubs', clubsRouter)
 app.use('/stats', statsRouter)
 app.use('/graph', graphRouter)
 app.use('/admin', adminRouter)
+app.use('/billing', billingRouter)
 
 // ─── SSE endpoint ─────────────────────────────────────────────────────────
 app.get('/events', (req: Request, res: Response) => {

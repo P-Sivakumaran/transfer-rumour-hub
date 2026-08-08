@@ -1,15 +1,20 @@
 'use client'
 
+import { Fragment } from 'react'
 import { useRumourFeed } from '@/lib/useRumourFeed'
 import RumourCard from './RumourCard'
+import AdSlot from './AdSlot'
 import type { Rumour } from '@/types'
 
 interface Props {
   initialRumours: Rumour[]
   total: number
+  adsEnabled?: boolean
 }
 
-export default function LiveRumourFeed({ initialRumours, total }: Props) {
+const AD_EVERY_N_CARDS = 5
+
+export default function LiveRumourFeed({ initialRumours, total, adsEnabled = false }: Props) {
   const rumours = useRumourFeed(initialRumours)
 
   return (
@@ -24,8 +29,13 @@ export default function LiveRumourFeed({ initialRumours, total }: Props) {
         </span>
       </div>
       <div className="space-y-3">
-        {rumours.map((r) => (
-          <RumourCard key={r.id} rumour={r} />
+        {rumours.map((r, i) => (
+          <Fragment key={r.id}>
+            <RumourCard rumour={r} />
+            {adsEnabled && i > 0 && (i + 1) % AD_EVERY_N_CARDS === 0 && (
+              <AdSlot index={Math.floor(i / AD_EVERY_N_CARDS)} />
+            )}
+          </Fragment>
         ))}
         {rumours.length === 0 && (
           <div className="rounded-xl border border-slate-800 bg-slate-900/40 p-12 text-center">
