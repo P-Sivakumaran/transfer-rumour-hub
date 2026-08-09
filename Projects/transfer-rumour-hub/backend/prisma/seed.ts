@@ -42,28 +42,33 @@ async function main() {
     prisma.club.upsert({ where: { externalId: 'CHE' }, update: {}, create: { externalId: 'CHE', name: 'Chelsea', shortName: 'Chelsea', league: 'Premier League', country: 'England' } }),
     prisma.club.upsert({ where: { externalId: 'ARS' }, update: {}, create: { externalId: 'ARS', name: 'Arsenal', shortName: 'Arsenal', league: 'Premier League', country: 'England' } }),
     prisma.club.upsert({ where: { externalId: 'JUV' }, update: {}, create: { externalId: 'JUV', name: 'Juventus', shortName: 'Juventus', league: 'Serie A', country: 'Italy' } }),
+    prisma.club.upsert({ where: { externalId: 'LIV' }, update: {}, create: { externalId: 'LIV', name: 'Liverpool', shortName: 'Liverpool', league: 'Premier League', country: 'England' } }),
+    prisma.club.upsert({ where: { externalId: 'MUN' }, update: {}, create: { externalId: 'MUN', name: 'Manchester United', shortName: 'Man United', league: 'Premier League', country: 'England' } }),
   ])
 
-  const [manCity, realMadrid, barcelona, bayern, psg, chelsea, arsenal, juventus] = clubs
+  const [manCity, realMadrid, barcelona, bayern, psg, chelsea, arsenal, juventus, liverpool, manUnited] = clubs
 
   // Players
   const now = new Date()
   const players = await Promise.all([
+    // Club fields below were corrected 2026-08-09 against live transfer news — the
+    // originals were demo placeholders that had drifted from reality (Gyökeres was
+    // never at Barcelona; Wirtz/Yoro/David have all since moved on from these clubs).
     prisma.player.upsert({
       where: { externalId: 'P001' }, update: {},
-      create: { externalId: 'P001', name: 'Viktor Gyökeres', age: 26, position: Position.ST, currentClubId: barcelona.id, contractEnd: new Date('2028-06-30'), marketValue: 120, nationality: 'Sweden' },
+      create: { externalId: 'P001', name: 'Viktor Gyökeres', age: 26, position: Position.ST, currentClubId: arsenal.id, contractEnd: new Date('2028-06-30'), marketValue: 120, nationality: 'Sweden' },
     }),
     prisma.player.upsert({
       where: { externalId: 'P002' }, update: {},
-      create: { externalId: 'P002', name: 'Florian Wirtz', age: 21, position: Position.CAM, currentClubId: bayern.id, contractEnd: new Date('2027-06-30'), marketValue: 130, nationality: 'Germany' },
+      create: { externalId: 'P002', name: 'Florian Wirtz', age: 21, position: Position.CAM, currentClubId: liverpool.id, contractEnd: new Date('2027-06-30'), marketValue: 130, nationality: 'Germany' },
     }),
     prisma.player.upsert({
       where: { externalId: 'P003' }, update: {},
-      create: { externalId: 'P003', name: 'Leny Yoro', age: 18, position: Position.CB, currentClubId: realMadrid.id, contractEnd: new Date('2029-06-30'), marketValue: 80, nationality: 'France' },
+      create: { externalId: 'P003', name: 'Leny Yoro', age: 18, position: Position.CB, currentClubId: manUnited.id, contractEnd: new Date('2029-06-30'), marketValue: 80, nationality: 'France' },
     }),
     prisma.player.upsert({
       where: { externalId: 'P004' }, update: {},
-      create: { externalId: 'P004', name: 'Jonathan David', age: 24, position: Position.ST, currentClubId: arsenal.id, contractEnd: new Date('2025-06-30'), marketValue: 65, nationality: 'Canada' },
+      create: { externalId: 'P004', name: 'Jonathan David', age: 24, position: Position.ST, currentClubId: juventus.id, contractEnd: new Date('2030-06-30'), marketValue: 65, nationality: 'Canada' },
     }),
   ])
 
@@ -74,7 +79,7 @@ async function main() {
     {
       externalId: 'R001',
       playerId: gyokeres.id,
-      fromClubId: barcelona.id,
+      fromClubId: arsenal.id,
       toClubId: manCity.id,
       sourceId: sources[0].id, // Romano
       reportedFeeMin: 100,
@@ -87,7 +92,7 @@ async function main() {
     {
       externalId: 'R002',
       playerId: wirtz.id,
-      fromClubId: bayern.id,
+      fromClubId: liverpool.id,
       toClubId: realMadrid.id,
       sourceId: sources[1].id, // Athletic
       reportedFeeMin: 120,
@@ -100,7 +105,7 @@ async function main() {
     {
       externalId: 'R003',
       playerId: david.id,
-      fromClubId: arsenal.id,
+      fromClubId: juventus.id,
       toClubId: psg.id,
       sourceId: sources[2].id, // Sky
       reportedFeeMin: 60,
@@ -113,7 +118,7 @@ async function main() {
     {
       externalId: 'R004',
       playerId: yoro.id,
-      fromClubId: realMadrid.id,
+      fromClubId: manUnited.id,
       toClubId: chelsea.id,
       sourceId: sources[3].id, // Marca
       reportedFeeMin: 70,
