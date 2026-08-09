@@ -1,11 +1,29 @@
 import { notFound } from 'next/navigation'
+import { cookies } from 'next/headers'
 import { api } from '@/lib/api'
 import RumourCard from '@/components/RumourCard'
+import WatchlistButton from '@/components/WatchlistButton'
+
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
+
+async function isWatched(playerId: number): Promise<boolean> {
+  if (!cookies().get('token')) return false
+  const res = await fetch(`${BASE}/watchlist`, {
+    headers: { Cookie: cookies().toString() },
+    cache: 'no-store',
+  })
+  if (!res.ok) return false
+  const items: { playerId: number }[] = await res.json()
+  return items.some((i) => i.playerId === playerId)
+}
 
 export default async function PlayerPage({ params }: { params: { id: string } }) {
   const id = parseInt(params.id, 10)
   const player = await api.players.get(id).catch(() => null)
   if (!player) notFound()
+
+  const authenticated = !!cookies().get('token')
+  const watched = await isWatched(id)
 
   const contractEnd = player.contractEnd
     ? new Date(player.contractEnd).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
@@ -39,6 +57,7 @@ export default async function PlayerPage({ params }: { params: { id: string } })
             </div>
           </div>
         </div>
+        <WatchlistButton playerId={player.id} initialWatched={watched} authenticated={authenticated} />
       </div>
 
       {/* Rumours */}

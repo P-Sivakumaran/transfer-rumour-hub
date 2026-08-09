@@ -98,6 +98,14 @@ npm run dev
 | GET | /stats/sources | Source reliability stats |
 | GET | /stats/overview | Global counts |
 | GET | /events | SSE stream (rumour:updated, rumours:ingested) |
+| POST | /auth/register | Create account, sets session cookie |
+| POST | /auth/login | Log in, sets session cookie |
+| POST | /auth/logout | Clear session cookie |
+| GET | /auth/me | Current user (401 if not logged in) |
+| GET | /watchlist | List watched players (auth required) |
+| POST | /watchlist | Add player to watchlist (auth required) |
+| DELETE | /watchlist/:playerId | Remove player from watchlist (auth required) |
+| GET | /rumours?watchlist=true | Feed filtered to watched players (auth required) |
 
 ## Likelihood scoring
 
@@ -126,7 +134,7 @@ Without a key the ingestion module returns stub rumours automatically.
 
 ## Roadmap to MVP
 
-- [ ] Auth (NextAuth.js) — user watchlists and notifications
+- [x] Auth (JWT + httpOnly cookie, own Credentials flow rather than NextAuth.js — backend already owns the DB and every other route, so session issuance lives in Express, not the Next app) — user watchlists (player-level, feed filter via `?watchlist=true`); notifications still open
 - [x] SSE hook in frontend — live TruthMeter updates without page refresh
 - [x] Admin panel — manually set rumour status (COMPLETED / FAILED / DENIED), gated on linked source evidence
 - [ ] ML scoring service — Python FastAPI + scikit-learn RandomForest trained on historic outcomes
@@ -147,7 +155,9 @@ Everything below is code-complete but blocked on external accounts/keys that wer
 2. **Player/club sync (`backend/src/ingestion/sportmonksCatalog.ts`, `playerClubSync.ts`)** — live and verified (2026-08-09) against a real `SPORTMONKS_API_KEY`, 3 consecutive runs, 241 clubs / 6,666 players each time (idempotent, no drift). Two things worth knowing:
    - **The configured key's plan is "Euro Club Tournaments" (trialing until 2026-08-22)** — scoped to exactly 4 UEFA competitions (Champions League, Europa League, Europa Conference League, UEFA Super Cup), *not* domestic leagues. `TARGET_LEAGUES` in `sportmonksCatalog.ts` reflects this, with real verified league/position IDs (not the earlier placeholder guesses). If the key changes to a domestic-league plan, `TARGET_LEAGUES` needs updating to match — check `GET /leagues?api_token=...` first to see what the new key actually has access to before assuming anything.
    - Also found and fixed a real, pre-existing bug while testing this: `createAxiosClient()` in `sportmonks.ts` was authenticating via a `Bearer` header, but Sportmonks v3 requires `api_token` as a query param — the header approach 401s even with a valid key. This had never been tested against a real key before, so it's been broken since day one; `/transfers` ingestion should also start working now.
-   - Known gap: club-name adoption matches by exact string, so "Paris Saint-Germain" (seed) vs "Paris Saint Germain" (Sportmonks, no hyphen) created a duplicate row instead of merging — same risk applies to any other punctuation/spelling variant between seed and provider names. Not fixed; exact-match was a deliberate simplicity tradeoff in the original design and this is the first real case of it costing a false negative rather than a false positive.
+   - Club-name dedup fixed (2026-08-09, commit `60cea10`): names now normalized (punctuation/case) before matching, so "Paris Saint-Germain" (seed) and "Paris Saint Germain" (Sportmonks) merge instead of duplicating. Same commit also fixed cross-competition club overwrite (a club in >1 target UEFA competition was losing/duplicating league data) and a 100%-failure country lookup 404 (wrong axios base URL, `/core/countries` needs `/v3/core` not `/v3/football/core`).
    - Re-run manually anytime with `POST /admin/players/sync` rather than waiting for the daily schedule.
 
 3. **Rumour data quality** — if the `rumours` table ever looks untrustworthy again (wrong club pairings, duplicates, fabricated entities), start by reading `backend/src/ingestion/entityMatcher.ts` top-to-bottom — several rounds of real bugs were found and fixed there by tracing actual ingested headlines through `extractRumoursFromText()` rather than guessing, e.g. via a throwaway `tsx` script. The dev DB can be reset to a clean state at any time with the wipe-and-reseed sequence in git history (see commits `2185235`, `fb1f4b6`, `354f9cb`) — delete `rumour_history`/`rumours`/`raw_signals`/auto-created players+clubs, reset source `hitCount`/`missCount`/`reliabilityScore`, restart the backend to re-ingest.
+
+4. **Auth (`backend/src/routes/auth.ts`, `backend/src/middleware/auth.ts`)** — code-complete and verified end-to-end this session (register/login/logout/me, watchlist add/list/remove, `/rumours?watchlist=true` feed filter — all curl-tested; SSR auth state on `/player/[id]` and `/watchlist` confirmed via cookie-forwarded fetch). Not blocked on anything to *run* — `JWT_SECRET` falls back to a dev default (`middleware/auth.ts`, `controllers/authController.ts`) so it works out of the box locally. Before shipping to anywhere real: set a real `JWT_SECRET` in `backend/.env` (`openssl rand -hex 32`) — the dev fallback signs valid sessions for anyone who reads the source. Chose a plain JWT/httpOnly-cookie flow over NextAuth.js since the backend (Express + Prisma) already owns the DB and every other route — NextAuth's adapter model assumes the Next app owns the session, which would've split auth state across two servers for no benefit here. Scope was deliberately capped at watchlists; notification delivery (email/push) is a separate, still-open roadmap item since it's its own external dependency.

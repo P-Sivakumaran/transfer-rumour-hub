@@ -1,6 +1,7 @@
 import 'express-async-errors'
 import express, { type NextFunction, type Request, type Response } from 'express'
 import cors from 'cors'
+import cookieParser from 'cookie-parser'
 import { randomUUID } from 'crypto'
 import { ZodError } from 'zod'
 
@@ -11,6 +12,8 @@ import statsRouter from './routes/stats.js'
 import graphRouter from './routes/graph.js'
 import adminRouter from './routes/admin.js'
 import billingRouter from './routes/billing.js'
+import authRouter from './routes/auth.js'
+import watchlistRouter from './routes/watchlist.js'
 import { addClient, clientCount } from './sse/broadcaster.js'
 import { startWorkers } from './queue/workers.js'
 import { scheduleRecurringJobs } from './queue/scheduler.js'
@@ -18,8 +21,9 @@ import { scheduleRecurringJobs } from './queue/scheduler.js'
 const app = express()
 const PORT = parseInt(process.env.PORT ?? '3001', 10)
 
-app.use(cors({ origin: process.env.FRONTEND_URL ?? 'http://localhost:3000' }))
+app.use(cors({ origin: process.env.FRONTEND_URL ?? 'http://localhost:3000', credentials: true }))
 app.use(express.json())
+app.use(cookieParser())
 
 // ─── REST routes ──────────────────────────────────────────────────────────
 app.use('/rumours', rumoursRouter)
@@ -29,6 +33,8 @@ app.use('/stats', statsRouter)
 app.use('/graph', graphRouter)
 app.use('/admin', adminRouter)
 app.use('/billing', billingRouter)
+app.use('/auth', authRouter)
+app.use('/watchlist', watchlistRouter)
 
 // ─── SSE endpoint ─────────────────────────────────────────────────────────
 app.get('/events', (req: Request, res: Response) => {

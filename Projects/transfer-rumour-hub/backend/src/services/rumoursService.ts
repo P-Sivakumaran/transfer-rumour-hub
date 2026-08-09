@@ -19,6 +19,7 @@ export interface RumourFilters {
   window?: string
   page?: number
   limit?: number
+  playerIds?: number[]
 }
 
 export async function listRumours(filters: RumourFilters): Promise<{
@@ -46,6 +47,9 @@ export async function listRumours(filters: RumourFilters): Promise<{
   }
   if (filters.position) {
     where.player = { position: filters.position as any }
+  }
+  if (filters.playerIds) {
+    where.playerId = { in: filters.playerIds }
   }
 
   const [data, total] = await Promise.all([
