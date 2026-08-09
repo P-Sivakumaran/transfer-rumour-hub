@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import type { Rumour } from '@/types'
 import TruthMeter from './TruthMeter'
 import { clsx } from 'clsx'
@@ -48,11 +49,18 @@ function feeLabel(min: number | null, max: number | null, currency: string): str
 }
 
 export default function RumourCard({ rumour, compact = false }: Props) {
+  const router = useRouter()
+
   return (
-    <Link
-      href={`/rumour/${rumour.id}`}
+    <div
+      role="link"
+      tabIndex={0}
+      onClick={() => router.push(`/rumour/${rumour.id}`)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') router.push(`/rumour/${rumour.id}`)
+      }}
       className={clsx(
-        'group relative flex gap-4 rounded-xl border border-slate-700/60 bg-slate-800/60 p-4 backdrop-blur-sm',
+        'group relative flex cursor-pointer gap-4 rounded-xl border border-slate-700/60 bg-slate-800/60 p-4 backdrop-blur-sm',
         'transition-all duration-200 hover:border-slate-500 hover:bg-slate-800 hover:shadow-lg hover:shadow-black/30',
         compact ? 'items-center' : 'flex-col sm:flex-row sm:items-start',
       )}
@@ -128,6 +136,6 @@ export default function RumourCard({ rumour, compact = false }: Props) {
           </div>
         )}
       </div>
-    </Link>
+    </div>
   )
 }
