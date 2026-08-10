@@ -9,7 +9,7 @@ import { fetchLatestRumours } from '../ingestion/sportmonks.js'
 import { fetchRSSSignals, RSS_FEEDS } from '../ingestion/sources/rss.js'
 import { fetchApiFootballTransfers } from '../ingestion/sources/apifootball.js'
 import { extractRumoursFromText, getEntities } from '../ingestion/entityMatcher.js'
-import { computeScore } from '../scoring/likelihoodEngine.js'
+import { computeScoreML } from '../scoring/mlScorer.js'
 import { broadcast } from '../sse/broadcaster.js'
 import { detectOutcome, applyOutcome } from '../ingestion/outcomeDetector.js'
 import { runPlayerEnrichment } from '../ingestion/enrichment.js'
@@ -327,7 +327,7 @@ async function processScore(job: { data: ScoreJobData }) {
     ? (contractEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
     : null
 
-  const { score } = computeScore({
+  const scoringInputs = {
     sourceReliability: rumour.source?.reliabilityScore ?? 0.5,
     monthsToContractExpiry: monthsToExpiry,
     reportedFeeMin: rumour.reportedFeeMin,
@@ -336,7 +336,9 @@ async function processScore(job: { data: ScoreJobData }) {
     clubNeedScore: 0.6,
     distinctSourceCount: rumour.distinctSourceCount,
     baseProbability: rumour.baseProbability,
-  })
+  }
+
+  const { score, scoreSource } = await computeScoreML(scoringInputs)
 
   const newStatus: RumourStatus = score >= 70 ? RumourStatus.HOT : RumourStatus.PENDING
 
@@ -346,6 +348,9 @@ async function processScore(job: { data: ScoreJobData }) {
   })
   await prisma.rumourHistory.create({
     data: { rumourId: rumour.id, computedLikelihood: score, status: newStatus },
+  })
+  await prisma.scoringSnapshot.create({
+    data: { rumourId: rumour.id, ...scoringInputs, score, scoreSource },
   })
 
   broadcast('rumour:updated', { id: rumour.id, computedLikelihood: score, status: newStatus })
