@@ -12,6 +12,7 @@ Real-time football transfer rumour tracker with likelihood scoring, club dashboa
 | ORM | Prisma + Postgres | Type-safe queries, migrations built in |
 | Real-time | Server-Sent Events | Simpler than WebSockets for one-way feed updates |
 | Scheduler | node-cron | In-process cron for rumour ingestion + score recomputation |
+| ML scoring | FastAPI + scikit-learn | Opt-in model service (`ml-service/`), heuristic fallback when unset/untrained |
 
 ## Project structure
 
@@ -33,6 +34,10 @@ transfer-rumour-hub/
 │       │   └── scheduler.ts    # Cron: ingest + recompute
 │       └── sse/
 │           └── broadcaster.ts  # SSE client registry + broadcast
+├── ml-service/                 # Optional: FastAPI + scikit-learn RandomForest
+│   ├── app.py                  # /score, /health, /reload
+│   ├── train.py                # Gated on >= MIN_PER_CLASS labeled outcomes
+│   └── features.py             # Shared feature vector (train + serve)
 └── frontend/
     └── src/
         ├── app/                # Next.js App Router pages
@@ -122,7 +127,9 @@ Inputs → 0–100 score. Weight budget:
 | Fee alignment to market value | 12 |
 | Provider base probability | 5 |
 
-**ML swap path:** replace the body of `computeScore()` with a call to a FastAPI micro-service accepting the same `ScoringInputs` and returning `{ score, breakdown }`. The interface is already typed.
+**ML swap path — done, cold-started:** `backend/src/scoring/mlScorer.ts` calls the model service at `ml-service/` (FastAPI + scikit-learn RandomForest) when `MODEL_SERVICE_URL` is set, and falls back to `computeScore()` (the heuristic above) on any error, timeout, or 503. `computeScore()` itself is untouched — still sync, still what every test in `likelihoodEngine.test.ts` exercises.
+
+Every scoring pass now also writes a `ScoringSnapshot` row (`backend/src/queue/workers.ts`) with the exact `ScoringInputs` used, so the training set doesn't have to reconstruct point-in-time features from mutable rows later. See `ml-service/README.md` for why there's no trained model yet (need both outcome classes) and how to train/serve once there is.
 
 ## External API keys
 
@@ -137,7 +144,7 @@ Without a key the ingestion module returns stub rumours automatically.
 - [x] Auth (JWT + httpOnly cookie, own Credentials flow rather than NextAuth.js — backend already owns the DB and every other route, so session issuance lives in Express, not the Next app) — user watchlists (player-level, feed filter via `?watchlist=true`); notifications still open
 - [x] SSE hook in frontend — live TruthMeter updates without page refresh
 - [x] Admin panel — manually set rumour status (COMPLETED / FAILED / DENIED), gated on linked source evidence
-- [ ] ML scoring service — Python FastAPI + scikit-learn RandomForest trained on historic outcomes
+- [~] ML scoring service — Python FastAPI + scikit-learn RandomForest (`ml-service/`), wired into the backend via `MODEL_SERVICE_URL` with heuristic fallback. Code-complete but untrained: the dev DB has 0 FAILED/DENIED rumours, so `train.py` refuses to produce a model until outcomes accumulate (see `ml-service/README.md`)
 - [x] More competitions — Champions League, Europa League, Europa Conference League, UEFA Super Cup (via Sportmonks sync); World Cup still open
 - [ ] Rumour sourcing — scrape additional providers (Football Italia, L'Equipe)
 - [ ] Mobile app — React Native sharing the same API
@@ -160,4 +167,6 @@ Everything below is code-complete but blocked on external accounts/keys that wer
 
 3. **Rumour data quality** — if the `rumours` table ever looks untrustworthy again (wrong club pairings, duplicates, fabricated entities), start by reading `backend/src/ingestion/entityMatcher.ts` top-to-bottom — several rounds of real bugs were found and fixed there by tracing actual ingested headlines through `extractRumoursFromText()` rather than guessing, e.g. via a throwaway `tsx` script. The dev DB can be reset to a clean state at any time with the wipe-and-reseed sequence in git history (see commits `2185235`, `fb1f4b6`, `354f9cb`) — delete `rumour_history`/`rumours`/`raw_signals`/auto-created players+clubs, reset source `hitCount`/`missCount`/`reliabilityScore`, restart the backend to re-ingest.
 
-4. **Auth (`backend/src/routes/auth.ts`, `backend/src/middleware/auth.ts`)** — code-complete and verified end-to-end this session (register/login/logout/me, watchlist add/list/remove, `/rumours?watchlist=true` feed filter — all curl-tested; SSR auth state on `/player/[id]` and `/watchlist` confirmed via cookie-forwarded fetch). Not blocked on anything to *run* — `JWT_SECRET` falls back to a dev default (`middleware/auth.ts`, `controllers/authController.ts`) so it works out of the box locally. Before shipping to anywhere real: set a real `JWT_SECRET` in `backend/.env` (`openssl rand -hex 32`) — the dev fallback signs valid sessions for anyone who reads the source. Chose a plain JWT/httpOnly-cookie flow over NextAuth.js since the backend (Express + Prisma) already owns the DB and every other route — NextAuth's adapter model assumes the Next app owns the session, which would've split auth state across two servers for no benefit here. Scope was deliberately capped at watchlists; notification delivery (email/push) is a separate, still-open roadmap item since it's its own external dependency.
+4. **ML scoring service (`ml-service/`)** — code-complete, verified end-to-end this session (trained a throwaway model on fabricated data, confirmed `/score`, `/health`, `/reload`, the 503 gate, and all three `mlScorer.ts` paths — model hit, service unreachable, `MODEL_SERVICE_URL` unset — via curl and a `tsx` script). Blocked on real data, not code: the dev DB has 2 COMPLETED and 0 FAILED/DENIED rumours, and `train.py` refuses to write a model until both classes have `MIN_PER_CLASS` (default 5) examples. `backend/src/queue/workers.ts` now writes a `ScoringSnapshot` per scoring pass, so once more rumours resolve (via the RSS outcome detector or admin corrections), just `cd ml-service && python train.py` and set `MODEL_SERVICE_URL` in `backend/.env` — no other code changes needed.
+
+5. **Auth (`backend/src/routes/auth.ts`, `backend/src/middleware/auth.ts`)** — code-complete and verified end-to-end this session (register/login/logout/me, watchlist add/list/remove, `/rumours?watchlist=true` feed filter — all curl-tested; SSR auth state on `/player/[id]` and `/watchlist` confirmed via cookie-forwarded fetch). Not blocked on anything to *run* — `JWT_SECRET` falls back to a dev default (`middleware/auth.ts`, `controllers/authController.ts`) so it works out of the box locally. Before shipping to anywhere real: set a real `JWT_SECRET` in `backend/.env` (`openssl rand -hex 32`) — the dev fallback signs valid sessions for anyone who reads the source. Chose a plain JWT/httpOnly-cookie flow over NextAuth.js since the backend (Express + Prisma) already owns the DB and every other route — NextAuth's adapter model assumes the Next app owns the session, which would've split auth state across two servers for no benefit here. Scope was deliberately capped at watchlists; notification delivery (email/push) is a separate, still-open roadmap item since it's its own external dependency.

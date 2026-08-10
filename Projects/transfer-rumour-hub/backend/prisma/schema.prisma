@@ -121,8 +121,34 @@ model Rumour {
   contradictsRel  Rumour?  @relation("RumourContradiction", fields: [contradicts], references: [id])
   contradictedBy  Rumour[] @relation("RumourContradiction")
   history         RumourHistory[]
+  scoringSnapshots ScoringSnapshot[]
 
   @@map("rumours")
+}
+
+// Point-in-time ScoringInputs feature values, written every time a rumour is
+// scored. Rumour.status / source.reliabilityScore mutate over time, so this
+// is what the ML training set reads from instead — the live rows would leak
+// the outcome-influenced reliability back into the features.
+model ScoringSnapshot {
+  id                     Int      @id @default(autoincrement())
+  rumourId               Int
+  sourceReliability      Float
+  monthsToContractExpiry Float?
+  reportedFeeMin         Float?
+  reportedFeeMax         Float?
+  marketValue            Float?
+  clubNeedScore          Float
+  distinctSourceCount    Int
+  baseProbability        Float?
+  score                  Float
+  scoreSource            String   // "heuristic" | "ml"
+  createdAt              DateTime @default(now())
+
+  rumour Rumour @relation(fields: [rumourId], references: [id])
+
+  @@index([rumourId])
+  @@map("scoring_snapshots")
 }
 
 // Append-only log of likelihood changes — powers the timeline chart
