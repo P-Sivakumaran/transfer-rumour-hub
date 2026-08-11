@@ -267,13 +267,24 @@ interface CandidateName {
   extractionConfidence: number
 }
 
-// A leading possessive ("Inter's Pio Esposito") is a club owning/scouting the
-// player, not part of their name — the apostrophe-continuation in NAME_WORD
-// (needed for real names like "N'Golo" or "D'Ambrosio") also happens to match
-// this. Strip a leading "X's " before validating the candidate.
-const LEADING_POSSESSIVE = /^\p{Lu}[\p{L}]*'s\s+/u
+// A leading possessive ("Inter's Pio Esposito", "Man City's Dias") is a club
+// owning/scouting the player, not part of their name — the
+// apostrophe-continuation in NAME_WORD (needed for real names like "N'Golo"
+// or "D'Ambrosio") also happens to match this. Strip a leading "X's " or
+// "X Y's " (two-word club names) before validating the candidate; NAME's own
+// 3-word cap means a 2-word possessive prefix can otherwise consume the
+// entire match and leave nothing of the actual player name captured at all.
+const LEADING_POSSESSIVE = /^(?:\p{Lu}[\p{L}]*\s+)?\p{Lu}[\p{L}]*'s\s+/u
 
-function extractCandidateNames(text: string): CandidateName[] {
+// A nationality/country name immediately followed by a position word
+// ("Northern Ireland midfielder", "Ivory Coast defender") is a descriptive
+// clause, not a person's name — NAME's greedy 3-word cap grabs the
+// nationality phrase and stops short of the real surname further in the
+// sentence. Reuses the position-word list already in STOP_NAMES.
+const POSITION_WORD_FOLLOWING =
+  /^\s*(goalkeeper|defender|midfielder|forward|striker|winger|fullback|sweeper|keeper|attacker)\b/i
+
+export function extractCandidateNames(text: string): CandidateName[] {
   const found = new Map<string, number>()
   for (const pattern of PLAYER_EXTRACTION_PATTERNS) {
     const m = text.match(pattern)
@@ -282,6 +293,8 @@ function extractCandidateNames(text: string): CandidateName[] {
     if (!isProperName(name)) continue
 
     const lookahead = text.slice(m.index + m[0].length, m.index + m[0].length + MANAGER_LOOKAHEAD_RADIUS)
+
+    if (POSITION_WORD_FOLLOWING.test(lookahead)) continue
 
     if (pattern === PLAYER_EXTRACTION_PATTERNS[2]) {
       const otherNameMatch = lookahead.match(NAME_ONLY)
@@ -603,15 +616,14 @@ export async function extractRumoursFromText(
     const closestClubScore = bestScore(candidate.name, clubs)
     if (closestClubScore >= 0.65) continue
 
-    const newPlayerId = await autoCreatePlayer(candidate.name)
-    if (newPlayerId === null) continue // another worker is handling this name
-
-    // Re-fetch once after player creation; reuse for the rest of this candidate
-    const freshEntities = await getEntities()
-    const freshClubs = freshEntities.clubs
-
+    // Determine club mentions BEFORE creating anything. Auto-creating the
+    // player first meant every candidate that later failed the club-count
+    // check (line below) still left a permanent bogus Player row behind —
+    // e.g. "Andoni Iraola confirms Liverpool transfer priority" (Liverpool's
+    // manager, one club mentioned, no rumour possible) recreated that exact
+    // row on every fresh ingest even after the extraction-pattern fixes.
     const mentionedClubs: Array<{ id: number; name: string; score: number }> = []
-    for (const club of freshClubs) {
+    for (const club of clubs) {
       const clubScore = Math.max(
         similarity(headline, club.name),
         club.shortName ? similarity(headline, club.shortName) : 0,
@@ -622,14 +634,14 @@ export async function extractRumoursFromText(
     if (mentionedClubs.length < 2) {
       const clubCandidates = extractClubCandidates(headline)
       for (const clubName of clubCandidates) {
-        const existing = findBestClub(clubName, freshClubs)
+        const existing = findBestClub(clubName, clubs)
         if (existing) {
           if (!mentionedClubs.find((c) => c.id === existing.id)) {
             mentionedClubs.push({ id: existing.id, name: existing.name, score: existing.score })
           }
           continue
         }
-        if (bestScore(clubName, freshClubs) < 0.70) {
+        if (bestScore(clubName, clubs) < 0.70) {
           const newClubId = await autoCreateClub(clubName)
           if (newClubId !== null) {
             // Use the name we passed in — no extra DB round-trip needed
@@ -641,15 +653,15 @@ export async function extractRumoursFromText(
 
     if (mentionedClubs.length < 2) continue
 
-    // freshClubs is already current (includes any clubs auto-created above via getEntities)
+    const newPlayerId = await autoCreatePlayer(candidate.name)
+    if (newPlayerId === null) continue // another worker is handling this name
+
+    // Re-fetch once after player (and possibly club) creation above
+    const freshEntities = await getEntities()
+    const freshClubs = freshEntities.clubs
+
     const headlineLower = headline.toLowerCase()
-    const { fromClub, toClub } = resolveDirection(
-      headlineLower,
-      headline,
-      // Merge freshClubs with mentionedClubs for direction resolution
-      freshClubs,
-      mentionedClubs,
-    )
+    const { fromClub, toClub } = resolveDirection(headlineLower, headline, freshClubs, mentionedClubs)
     if (!fromClub || !toClub || fromClub.id === toClub.id) continue
 
     results.push({

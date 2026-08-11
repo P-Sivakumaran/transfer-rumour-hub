@@ -84,6 +84,30 @@ David Gray’s side took the lead in the 12th minute with a Josh Campbell penalt
     headline: 'Here we go! Ruben Amorim agrees to become AC Milan boss as Man Utd handed cash boost - TribalFootball',
     summary: 'Here we go! Ruben Amorim agrees to become AC Milan boss as Man Utd handed cash boost  TribalFootball',
   },
+  {
+    rumourId: null,
+    note: 'Manager/player disambiguation, mechanism 4: no other named player and only 1 club mentioned — "Andoni Iraola confirms Liverpool transfer priority" still passes extractCandidateNames (none of mechanisms 1-3 apply), but used to persist a bogus Player row anyway because autoCreatePlayer ran before the mentionedClubs.length<2 check. Fixed by deferring player creation until after that check.',
+    headline: "Andoni Iraola confirms Liverpool transfer priority - 'Not the ideal situation' - The Mirror",
+    summary: "Andoni Iraola confirms Liverpool transfer priority - 'Not the ideal situation'  The Mirror",
+  },
+  {
+    rumourId: null,
+    note: 'Two-word club possessive: NAME\'s 3-word cap meant "Chelsea, Madrid, Barça chase Man City\'s Dias" captured "Man City\'s Dias" whole, and the old single-word LEADING_POSSESSIVE only stripped "X\'s ", not "X Y\'s ". Extended to strip an optional leading word too.',
+    headline: "Transfer rumors, news: Chelsea, Madrid, Barça chase Man City's Dias - ESPN",
+    summary: "Transfer rumors, news: Chelsea, Madrid, Barça chase Man City's Dias  ESPN",
+  },
+  {
+    rumourId: null,
+    note: 'Nationality + position read as a name: "Fulham sign Northern Ireland midfielder from Southampton" — NAME\'s greedy 3-word cap grabbed the nationality clause and never reached the real surname later in the sentence. Guard: skip if a position word (goalkeeper/defender/midfielder/...) immediately follows the match.',
+    headline: 'Shea Charles: Fulham sign Northern Ireland midfielder from Southampton for £30m - BBC',
+    summary: 'Shea Charles: Fulham sign Northern Ireland midfielder from Southampton for £30m  BBC',
+  },
+  {
+    rumourId: null,
+    note: 'Same nationality+position mechanism, combined with a club possessive: "Forest sign Sporting\'s Ivory Coast defender Diomande" stripped "Sporting\'s " to leave "Ivory Coast", then the position-word guard (defender) catches it.',
+    headline: "Forest sign Sporting's Ivory Coast defender Diomande",
+    summary: "Forest sign Sporting's Ivory Coast defender Diomande",
+  },
 ]
 
 const GOOD_CASES = [
