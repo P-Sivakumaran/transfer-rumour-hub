@@ -14,8 +14,29 @@ const prisma = new PrismaClient()
 
 // ─── Fuzzy helpers ─────────────────────────────────────────────────────────
 
+// NFD + strip combining marks folds "ã" to "a" (not delete-to-nothing).
+// Length-preserving — every accented character collapses back to exactly one
+// base character, so offsets into the result still line up with the source
+// string. Used where callers need to locate a substring position, not just
+// compare for equality (see foldAccents below).
+function stripCombiningMarks(s: string): string {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '')
+}
+
+// Case-folded version of stripCombiningMarks, for indexOf against text whose
+// positions must still map back to the original (non-folded) string.
+function foldAccents(s: string): string {
+  return stripCombiningMarks(s).toLowerCase()
+}
+
+// Otherwise "Guimarães" (DB spelling) normalises to "guimares" while
+// "Guimaraes" (the ASCII transliteration nearly every headline actually uses)
+// normalises to "guimaraes", and the two never match.
 function normalise(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim()
+  return stripCombiningMarks(s)
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, '')
+    .trim()
 }
 
 function levenshtein(a: string, b: string): number {
@@ -107,6 +128,21 @@ export { getEntities }
 
 const MATCH_THRESHOLD = 0.80
 const AUTO_CREATE_THRESHOLD = 0.85
+
+// Strategy 1 otherwise only requires 2 club mentions + a directional
+// preposition near a player's name — generic prose ("...defeat to Hibernian
+// compounded by striker Youssef Chermiti...") satisfies that with zero
+// transfer content. Deliberately excludes bare "sign"/"signing": a nearby
+// mention of someone else's signing (common in aggregator digests and match
+// reports alike) would let an unrelated article through.
+const TRANSFER_CONTEXT_KEYWORDS =
+  /\b(transfer|sign(?:s|ed)? for|joins?|joined|joining|moves? to|moved to|deal|bid|target(?:ed|s)?|linked|rumou?r|loan|medical|hijack|swoop|agreement|agrees? (?:a )?deal|chase(?:s|d)?|keen on|interested in|approach(?:ed)?)\b/i
+
+// Radius (chars) around a player mention searched for TRANSFER_CONTEXT_KEYWORDS.
+// Tighter than the 150-char club-matching window on purpose — that window is
+// wide enough to span into an unrelated adjacent sentence in a long article,
+// which would let this gate pass on the wrong sentence's content.
+const TRANSFER_CONTEXT_RADIUS = 60
 
 // Picks the closest qualifying club to the start of `text`, not just the
 // highest-scoring one. Callers pass a short slice right after a directional
@@ -303,8 +339,15 @@ const FROM_PREPOSITIONS = [' from ', ' leaves ', ' leave ', ' departs ', ' exits
 // guard, findBestClub scans past the verb and grabs whatever club happens to
 // be nearest in the lookahead window, which is not necessarily the real
 // destination.
+// "replace"/"hijack"/"bid" belong here too: "linked ... to replace Morgan
+// Rogers", "backed to hijack ... Liverpool transfer", and "set to bid £70m
+// for Newcastle midfielder" are the same infinitive construction — X is not
+// the destination of a " to " cue, it's the object of a verb. Missing these
+// produced three confirmed-wrong rumours (98, a mononym-fix-induced
+// regression on signal 7196, and a live one on a fresh post-wipe re-ingest —
+// see entityMatcher.replay.ts).
 const TO_INFINITIVE_VERBS =
-  /^(leave|leaves|join|joins|sign|signs|complete|completes|become|becomes|move|moves|head|heads|make|makes|watch|watching|monitor|monitoring|scout|scouting|track|tracking|assess|assessing)\b/i
+  /^(leave|leaves|join|joins|sign|signs|complete|completes|become|becomes|move|moves|head|heads|make|makes|watch|watching|monitor|monitoring|scout|scouting|track|tracking|assess|assessing|replace|replaces|hijack|hijacks|bid|bids|bidding)\b/i
 
 // "Reports/news/sources **from** X" attributes the story to a publication,
 // not a transfer origin — the same bare " from " cue that catches a real
@@ -324,6 +367,24 @@ function resolveDirection(
   let fromClub: (typeof mentionedClubs)[0] | null = null
   let toClub: (typeof mentionedClubs)[0] | null = null
 
+  // Directional-cue lookups below must only resolve to one of the two clubs
+  // Strategy 1/2 already vetted as actually mentioned near this player — not
+  // the whole club table. A fixed-width slice (afterPrep, 40 chars) can cut a
+  // word in half, and the truncated fragment can coincidentally whole-token
+  // match some unrelated club's short code (e.g. "...Daily Mirror Ast" from a
+  // duplicated headline+summary matched Astana's "AST" — rumour 98). Scoping
+  // to mentionedClubs makes that class of coincidence impossible: the slice
+  // can now only ever resolve to one of the two clubs already confirmed present.
+  //
+  // Built from mentionedClubs rather than filtering `clubs`: Strategy 2's
+  // caller (below) can pass a `clubs` snapshot taken before an auto-created
+  // club was added to it, so that club would be missing from a filter — but
+  // it's always present in mentionedClubs. Falls back to a minimal synthesized
+  // record (name only, no shortName) when `clubs` doesn't have it yet.
+  const candidateClubs: EntityCache['clubs'] = mentionedClubs.map(
+    (m) => clubs.find((c) => c.id === m.id) ?? { id: m.id, name: m.name, shortName: null, league: 'Unknown' },
+  )
+
   // "leave X for Y" — very common transfer-journalism phrasing where X is the
   // origin and Y (after "for") is the destination. Resolved first because the
   // generic " to " cue below would otherwise misfire on "PLAYER **to** leave".
@@ -331,8 +392,8 @@ function resolveDirection(
   if (leaveIdx !== -1) {
     const forIdx = lower.indexOf(' for ', leaveIdx)
     if (forIdx !== -1 && forIdx - leaveIdx < 80) {
-      const leaveClub = findBestClub(text.slice(leaveIdx, forIdx), clubs)
-      const forClub = findBestClub(text.slice(forIdx + 5, forIdx + 5 + 40), clubs)
+      const leaveClub = findBestClub(text.slice(leaveIdx, forIdx), candidateClubs)
+      const forClub = findBestClub(text.slice(forIdx + 5, forIdx + 5 + 40), candidateClubs)
       if (leaveClub) fromClub = { id: leaveClub.id, name: leaveClub.name, score: leaveClub.score }
       if (forClub) toClub = { id: forClub.id, name: forClub.name, score: forClub.score }
     }
@@ -344,7 +405,7 @@ function resolveDirection(
       if (idx === -1) continue
       const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
       if (prep === ' to ' && TO_INFINITIVE_VERBS.test(afterPrep)) continue
-      const best = findBestClub(afterPrep, clubs)
+      const best = findBestClub(afterPrep, candidateClubs)
       if (best) { toClub = { id: best.id, name: best.name, score: best.score }; break }
     }
   }
@@ -355,7 +416,7 @@ function resolveDirection(
       if (idx === -1) continue
       if (prep === ' from ' && FROM_ATTRIBUTION_PRECEDING.test(lower.slice(Math.max(0, idx - 20), idx))) continue
       const afterPrep = text.slice(idx + prep.length, idx + prep.length + 40)
-      const best = findBestClub(afterPrep, clubs)
+      const best = findBestClub(afterPrep, candidateClubs)
       if (best) { fromClub = { id: best.id, name: best.name, score: best.score }; break }
     }
   }
@@ -391,13 +452,34 @@ export async function extractRumoursFromText(
 ): Promise<MatchedRumour[]> {
   const { players, clubs } = await getEntities()
   const text = `${headline} ${summary}`
-  const lower = text.toLowerCase()
+  // Same length as `text` (see foldAccents) — positions found in here map
+  // directly onto `text` for slicing, unlike a plain toLowerCase() which
+  // won't contain a match at all when the DB name is accented but the
+  // source text isn't (e.g. DB "Guimarães" vs. headline's ASCII "Guimaraes").
+  const foldedLower = foldAccents(text)
+  const normalisedText = normalise(text)
   const results: MatchedRumour[] = []
 
   // ── Strategy 1: match existing DB players ──────────────────────────────────
   for (const player of players) {
     const lastName = normalise(player.name).split(' ').pop()
-    if (!lastName || !normalise(text).includes(lastName)) continue
+    if (!lastName || !containsWholeToken(normalisedText, lastName)) continue
+
+    // A mononym's "last name" is its whole name, so the check above matches
+    // any text mentioning ANY player who happens to share that first name —
+    // e.g. "Bruno" (id 2425, a real distinct Sportmonks mononym) matching
+    // text that's actually about "Bruno Guimarães" (id 12), because "Bruno"
+    // is a standalone whole token inside "Bruno Guimarães" too. Defer to the
+    // fuller name when one is actually present in the text.
+    if (!player.name.includes(' ')) {
+      const fullerNamePresent = players.some(
+        (p2) =>
+          p2.id !== player.id &&
+          normalise(p2.name).startsWith(`${lastName} `) &&
+          containsWholeToken(normalisedText, normalise(p2.name)),
+      )
+      if (fullerNamePresent) continue
+    }
 
     const playerScore = similarity(player.name, text)
     if (playerScore < 0.75) continue
@@ -408,11 +490,44 @@ export async function extractRumoursFromText(
     // player's transfer. Falls back to the full text if we can't locate the
     // raw (possibly-accented) last name verbatim.
     const rawLastName = player.name.trim().split(/\s+/).pop() ?? ''
-    const mentionIdx = rawLastName ? lower.indexOf(rawLastName.toLowerCase()) : -1
-    const windowText =
-      mentionIdx === -1
-        ? text
-        : text.slice(Math.max(0, mentionIdx - 150), Math.min(text.length, mentionIdx + rawLastName.length + 150))
+    const mentionIdx = rawLastName ? foldedLower.indexOf(foldAccents(rawLastName)) : -1
+
+    // Require actual transfer vocabulary near the mention — 2 club names plus
+    // a bare "to"/"from" is common in ordinary match-report prose and isn't
+    // evidence of transfer news on its own (see rumour 94: "...defeat to
+    // Hibernian compounded by striker Youssef Chermiti being carried off...").
+    if (mentionIdx !== -1) {
+      const gateWindow = text.slice(
+        Math.max(0, mentionIdx - TRANSFER_CONTEXT_RADIUS),
+        Math.min(text.length, mentionIdx + rawLastName.length + TRANSFER_CONTEXT_RADIUS),
+      )
+      if (!TRANSFER_CONTEXT_KEYWORDS.test(gateWindow)) continue
+    }
+
+    const w150Start = Math.max(0, mentionIdx - 150)
+    const w150End = Math.min(text.length, mentionIdx + rawLastName.length + 150)
+    const window150 = mentionIdx === -1 ? text : text.slice(w150Start, w150End)
+    // foldAccents doesn't change string length, so this slices to the exact
+    // same span as window150 — safe to search in for the same mention.
+    const window150Folded = mentionIdx === -1 ? foldedLower : foldedLower.slice(w150Start, w150End)
+
+    // Aggregator digests join several unrelated one-line stories with commas
+    // or " - " ("Rashford bombshell, Rodri to Barcelona, Arsenal update"), and
+    // 150 chars is wide enough to span into a neighbouring story — without this,
+    // the 2-club elimination fallback below can pair a club from a different
+    // headline fragment as if it were this player's from/to club. Narrow to
+    // just the comma/dash-delimited clause that actually contains the mention.
+    const windowText = ((): string => {
+      const mIdx = rawLastName ? window150Folded.indexOf(foldAccents(rawLastName)) : -1
+      if (mIdx === -1) return window150
+      const left = Math.max(window150.lastIndexOf(',', mIdx), window150.lastIndexOf(' - ', mIdx)) + 1
+      let right = window150.length
+      const rightComma = window150.indexOf(',', mIdx)
+      if (rightComma !== -1) right = Math.min(right, rightComma)
+      const rightDash = window150.indexOf(' - ', mIdx)
+      if (rightDash !== -1) right = Math.min(right, rightDash)
+      return window150.slice(left, right)
+    })()
     const windowLower = windowText.toLowerCase()
 
     const mentionedClubs: Array<{ id: number; name: string; score: number }> = []
