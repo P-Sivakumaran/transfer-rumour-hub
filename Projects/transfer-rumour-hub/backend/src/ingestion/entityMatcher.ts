@@ -235,12 +235,32 @@ function isProperName(candidate: string): boolean {
 const NAME_WORD = `\\p{Lu}[\\p{L}'-]+`
 const NAME = `${NAME_WORD}(?:\\s${NAME_WORD}){1,2}`
 
+// Trailing alternatives need a word boundary — without it "to" matches the
+// first two letters of "told" ("Mikel Arteta **told** Arsenal winger...",
+// a manager relaying news about someone else, misread as "Arteta to
+// [destination]"), same for "joins"/"signs" inside a longer unrelated word.
 const PLAYER_EXTRACTION_PATTERNS = [
-  new RegExp(`^(${NAME})\\s+(?:to|joins?|signs? for|moves? to|heading to|completes? move to|set to join)`, 'u'),
+  new RegExp(`^(${NAME})\\s+(?:to|joins?|signs? for|moves? to|heading to|completes? move to|set to join)\\b`, 'u'),
   new RegExp(`(?:sign(?:s|ed)?|target(?:s|ed)?|eye(?:s|d)?|want(?:s|ed)?|bid(?:s)? for|keen on|chase(?:s|d)?|linked with|interested in|approach(?:ed)?|agree(?:s|d)? deal for|complete(?:s|d)? signing of)\\s+(${NAME})`, 'u'),
   new RegExp(`(${NAME})\\s+(?:completes?|confirms?|announces?|agrees?|passes? medical|here we go)`, 'u'),
-  new RegExp(`[:\\-–]\\s+(${NAME})\\s+(?:to|joins?|signs?)`, 'u'),
+  new RegExp(`[:\\-–]\\s+(${NAME})\\s+(?:to|joins?|signs?)\\b`, 'u'),
 ]
+
+// Radius (chars) searched right after a pattern match for the two guards below.
+const MANAGER_LOOKAHEAD_RADIUS = 40
+
+// "X confirms/agrees/announces Y ..." where Y is itself a proper name right
+// after the trigger is X making a statement about Y, not X being the
+// transfer subject ("Diego Simeone confirms Julian Alvarez transfer
+// 'decision'" — Simeone is Atlético's manager, Alvarez is the real subject).
+// Only pattern 3 (NAME-then-trigger) is ambiguous this way; patterns 1/2/4
+// already have the subject on the NAME side of the trigger, not the other.
+const NAME_ONLY = new RegExp(NAME, 'u')
+
+// Managerial appointments share transfer-adjacent vocabulary ("agrees",
+// "here we go") but aren't player transfers ("Ruben Amorim agrees to become
+// AC Milan boss").
+const MANAGERIAL_APPOINTMENT = /\b(boss|manager|head coach|assistant coach|director of football|sporting director|technical director)\b/i
 
 interface CandidateName {
   name: string
@@ -257,9 +277,19 @@ function extractCandidateNames(text: string): CandidateName[] {
   const found = new Map<string, number>()
   for (const pattern of PLAYER_EXTRACTION_PATTERNS) {
     const m = text.match(pattern)
-    if (!m || !m[1]) continue
+    if (!m || !m[1] || m.index === undefined) continue
     const name = m[1].trim().replace(LEADING_POSSESSIVE, '')
     if (!isProperName(name)) continue
+
+    const lookahead = text.slice(m.index + m[0].length, m.index + m[0].length + MANAGER_LOOKAHEAD_RADIUS)
+
+    if (pattern === PLAYER_EXTRACTION_PATTERNS[2]) {
+      const otherNameMatch = lookahead.match(NAME_ONLY)
+      if (otherNameMatch && isProperName(otherNameMatch[0])) continue
+    }
+
+    if (MANAGERIAL_APPOINTMENT.test(lookahead)) continue
+
     const base = 0.90 - PLAYER_EXTRACTION_PATTERNS.indexOf(pattern) * 0.02
     found.set(name, Math.max(found.get(name) ?? 0, base))
   }

@@ -66,6 +66,24 @@ David Gray’s side took the lead in the 12th minute with a Josh Campbell penalt
     headline: 'Bruno Guimaraes transfer news: Arsenal set to bid £70m for Newcastle midfielder - BBC',
     summary: 'Bruno Guimaraes transfer news: Arsenal set to bid £70m for Newcastle midfielder  BBC',
   },
+  {
+    rumourId: null,
+    note: 'Manager/player disambiguation, mechanism 1: missing word boundary. "to" (no \\b) matched inside "told", so PLAYER_EXTRACTION_PATTERNS[0] read "Mikel Arteta told..." as "Mikel Arteta to [destination]" and auto-created Arsenal\'s manager as a Player.',
+    headline: 'Mikel Arteta told Arsenal winger is better option than £145m transfer target - Metro.co.uk',
+    summary: 'Mikel Arteta told Arsenal winger is better option than £145m transfer target  Metro.co.uk',
+  },
+  {
+    rumourId: null,
+    note: 'Manager/player disambiguation, mechanism 2: third-party attribution. "Diego Simeone confirms Julian Alvarez transfer \'decision\'" matched pattern 3 (NAME + "confirms") on Simeone (Atlético\'s manager), but the real subject (Alvarez) is the proper name immediately after the trigger, not before it.',
+    headline: "Diego Simeone confirms Julian Alvarez transfer 'decision' amid Arsenal interest - The Mirror",
+    summary: "Diego Simeone confirms Julian Alvarez transfer 'decision' amid Arsenal interest  The Mirror",
+  },
+  {
+    rumourId: null,
+    note: 'Manager/player disambiguation, mechanism 3: managerial appointment, not a transfer. "Ruben Amorim agrees to become AC Milan boss" matched pattern 3 on "agrees"/"here we go" — real transfer vocabulary, just not describing a player transfer.',
+    headline: 'Here we go! Ruben Amorim agrees to become AC Milan boss as Man Utd handed cash boost - TribalFootball',
+    summary: 'Here we go! Ruben Amorim agrees to become AC Milan boss as Man Utd handed cash boost  TribalFootball',
+  },
 ]
 
 const GOOD_CASES = [
