@@ -36,6 +36,7 @@ export interface Rumour {
   id: number
   player: Player
   fromClub: Club
+  fromClubInferred: boolean
   toClub: Club
   source: Source
   reportedFeeMin: number | null

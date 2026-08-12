@@ -49,6 +49,12 @@ David Gray’s side took the lead in the 12th minute with a Josh Campbell penalt
  Continue reading...`,
   },
   {
+    rumourId: 135,
+    note: 'Fix 5 (question-mark digest split): "Folarin Balogun to Spurs? Pedro Neto to Manchester City?" is a 2-story roundup joined by "?", not comma/" - " — windowText only split on those, so Balogun\'s mentionedClubs window still included "Manchester City" from Neto\'s clause. The 2-club elimination fallback then assigned it as Balogun\'s fromClub (real current club: Monaco, not mentioned in this headline at all). Now should produce nothing for this signal, not a fabricated Man City -> Spurs move.',
+    headline: 'Football transfer rumours: Folarin Balogun to Spurs? Pedro Neto to Manchester City? - theguardian.com',
+    summary: 'Football transfer rumours: Folarin Balogun to Spurs? Pedro Neto to Manchester City?  theguardian.com',
+  },
+  {
     rumourId: 98,
     note: 'Fix 2 (club scope): mentioned clubs are Real Madrid + Aston Villa; "Astana" only appeared because a 40-char slice truncated mid-word into a duplicated copy of the headline ("...Daily Mirror Ast") and coincidentally whole-token-matched Astana\'s "AST" shortcode. Also a semantically inverted story either way (Morgan Rogers is the incumbent being replaced, not the transfer subject) — not attempting to fix that half here.',
     headline: 'Aston Villa linked with bargain Real Madrid transfer to replace Morgan Rogers - Daily Mirror',

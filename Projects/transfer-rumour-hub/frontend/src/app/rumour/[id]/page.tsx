@@ -3,11 +3,14 @@ import Link from 'next/link'
 import { api } from '@/lib/api'
 import TruthMeter from '@/components/TruthMeter'
 import TimelineChart from '@/components/TimelineChart'
+import { resolveDisplayOrigin } from '@/lib/rumourOrigin'
 
 export default async function RumourDetailPage({ params }: { params: { id: string } }) {
   const id = parseInt(params.id, 10)
   const rumour = await api.rumours.get(id).catch(() => null)
   if (!rumour) notFound()
+
+  const origin = resolveDisplayOrigin(rumour)
 
   const fee =
     rumour.reportedFeeMin != null && rumour.reportedFeeMax != null
@@ -32,9 +35,17 @@ export default async function RumourDetailPage({ params }: { params: { id: strin
             </Link>
           </h1>
           <div className="mt-2 flex flex-wrap items-center gap-2 text-lg">
-            <Link href={`/club/${rumour.fromClub.id}`} className="font-medium text-slate-300 hover:text-white">
-              {rumour.fromClub.name}
+            <Link href={`/club/${origin.club.id}`} className="font-medium text-slate-300 hover:text-white">
+              {origin.club.name}
             </Link>
+            {origin.unconfirmed && (
+              <span
+                className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-amber-400"
+                title="Origin club couldn't be confirmed from the source text — showing the player's actual current club instead"
+              >
+                unconfirmed origin
+              </span>
+            )}
             <span className="text-2xl text-slate-600">→</span>
             <Link href={`/club/${rumour.toClub.id}`} className="font-medium text-slate-300 hover:text-white">
               {rumour.toClub.name}

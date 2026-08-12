@@ -13,44 +13,44 @@ const BASE_INPUTS = {
 }
 
 describe('computeScore', () => {
-  it('returns score in 0–100 range', () => {
-    const { score } = computeScore(BASE_INPUTS)
+  it('returns score in 0–100 range', async () => {
+    const { score } = await computeScore(BASE_INPUTS)
     expect(score).toBeGreaterThanOrEqual(0)
     expect(score).toBeLessThanOrEqual(100)
   })
 
-  it('higher source reliability → higher score', () => {
-    const low = computeScore({ ...BASE_INPUTS, sourceReliability: 0.1 })
-    const high = computeScore({ ...BASE_INPUTS, sourceReliability: 0.95 })
+  it('higher source reliability → higher score', async () => {
+    const low = await computeScore({ ...BASE_INPUTS, sourceReliability: 0.1 })
+    const high = await computeScore({ ...BASE_INPUTS, sourceReliability: 0.95 })
     expect(high.score).toBeGreaterThan(low.score)
   })
 
-  it('imminent contract expiry increases score', () => {
-    const longContract = computeScore({ ...BASE_INPUTS, monthsToContractExpiry: 36 })
-    const shortContract = computeScore({ ...BASE_INPUTS, monthsToContractExpiry: 2 })
+  it('imminent contract expiry increases score', async () => {
+    const longContract = await computeScore({ ...BASE_INPUTS, monthsToContractExpiry: 36 })
+    const shortContract = await computeScore({ ...BASE_INPUTS, monthsToContractExpiry: 2 })
     expect(shortContract.score).toBeGreaterThan(longContract.score)
   })
 
-  it('more distinct sources increases score', () => {
-    const one = computeScore({ ...BASE_INPUTS, distinctSourceCount: 1 })
-    const five = computeScore({ ...BASE_INPUTS, distinctSourceCount: 5 })
+  it('more distinct sources increases score', async () => {
+    const one = await computeScore({ ...BASE_INPUTS, distinctSourceCount: 1 })
+    const five = await computeScore({ ...BASE_INPUTS, distinctSourceCount: 5 })
     expect(five.score).toBeGreaterThan(one.score)
   })
 
-  it('breakdown components sum ≤ 100', () => {
-    const { breakdown } = computeScore(BASE_INPUTS)
+  it('breakdown components sum ≤ 100', async () => {
+    const { breakdown } = await computeScore(BASE_INPUTS)
     const sum = Object.values(breakdown).reduce((a, b) => a + b, 0)
     expect(sum).toBeLessThanOrEqual(100)
   })
 
-  it('handles null contract expiry gracefully', () => {
-    const { score } = computeScore({ ...BASE_INPUTS, monthsToContractExpiry: null })
+  it('handles null contract expiry gracefully', async () => {
+    const { score } = await computeScore({ ...BASE_INPUTS, monthsToContractExpiry: null })
     expect(score).toBeGreaterThanOrEqual(0)
     expect(score).toBeLessThanOrEqual(100)
   })
 
-  it('unreliable social media source → low score', () => {
-    const { score } = computeScore({
+  it('unreliable social media source → low score', async () => {
+    const { score } = await computeScore({
       sourceReliability: 0.1,
       monthsToContractExpiry: 30,
       reportedFeeMin: null,

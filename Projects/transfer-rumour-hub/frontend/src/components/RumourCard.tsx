@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import type { Rumour } from '@/types'
 import TruthMeter from './TruthMeter'
+import { resolveDisplayOrigin } from '@/lib/rumourOrigin'
 import { clsx } from 'clsx'
 
 interface Props {
@@ -50,6 +51,7 @@ function feeLabel(min: number | null, max: number | null, currency: string): str
 
 export default function RumourCard({ rumour, compact = false }: Props) {
   const router = useRouter()
+  const origin = resolveDisplayOrigin(rumour)
 
   return (
     <div
@@ -97,12 +99,20 @@ export default function RumourCard({ rumour, compact = false }: Props) {
         {/* Club transfer row */}
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm">
           <Link
-            href={`/club/${rumour.fromClub.id}`}
+            href={`/club/${origin.club.id}`}
             className="font-medium text-slate-300 hover:text-white"
             onClick={(e) => e.stopPropagation()}
           >
-            {rumour.fromClub.shortName ?? rumour.fromClub.name}
+            {origin.club.shortName ?? origin.club.name}
           </Link>
+          {origin.unconfirmed && (
+            <span
+              className="rounded-full border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-400"
+              title="Origin club couldn't be confirmed from the source text — showing the player's actual current club instead"
+            >
+              unconfirmed origin
+            </span>
+          )}
           <span className="text-slate-500">→</span>
           <Link
             href={`/club/${rumour.toClub.id}`}

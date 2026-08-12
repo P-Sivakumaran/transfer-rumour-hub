@@ -181,6 +181,7 @@ async function processIngest(job: { data: IngestJobData }) {
             data: {
               playerId: candidate.playerId,
               fromClubId: candidate.fromClubId,
+              fromClubInferred: candidate.fromClubInferred,
               toClubId: candidate.toClubId,
               sourceId,
               baseProbability: candidate.confidence,
@@ -327,7 +328,7 @@ async function processScore(job: { data: ScoreJobData }) {
     ? (contractEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
     : null
 
-  const { score } = computeScore({
+  const { score } = await computeScore({
     sourceReliability: rumour.source?.reliabilityScore ?? 0.5,
     monthsToContractExpiry: monthsToExpiry,
     reportedFeeMin: rumour.reportedFeeMin,

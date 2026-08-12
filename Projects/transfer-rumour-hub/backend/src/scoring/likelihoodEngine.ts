@@ -2,12 +2,13 @@
  * Likelihood Scoring Engine
  *
  * Produces a 0–100 score for each transfer rumour.
- * Designed so the `computeScore` function can later be swapped for an ML model
- * (e.g. a RandomForest trained on historic rumour outcomes) without changing callers.
  *
- * Swap path: replace `heuristicScore` with a call to a Python scoring micro-service
- * that accepts the same `ScoringInputs` and returns `ScoringOutput`.
+ * `computeScore` calls the Python ML scoring service (ml-service/) when
+ * ML_SCORING_URL is set, and falls back to the heuristic below on any error,
+ * timeout, or missing config — same pattern as billing/ingestion degrading
+ * gracefully without their external dependencies.
  */
+import axios from 'axios'
 
 export interface ScoringInputs {
   /** 0.0–1.0 — how reliable the reporting source is */
@@ -132,10 +133,25 @@ function heuristicScore(inputs: ScoringInputs): ScoringOutput {
   }
 }
 
+const ML_SCORING_URL = process.env.ML_SCORING_URL
+const ML_SCORING_TIMEOUT_MS = Number(process.env.ML_SCORING_TIMEOUT_MS ?? 1500)
+
 /**
  * Public API — call this everywhere.
- * To swap in an ML model: replace the body with a fetch to your Python scoring service.
+ * Tries the ML scoring service first (if configured), falls back to the
+ * heuristic on any failure so a down/slow Python process never breaks scoring.
  */
-export function computeScore(inputs: ScoringInputs): ScoringOutput {
-  return heuristicScore(inputs)
+export async function computeScore(inputs: ScoringInputs): Promise<ScoringOutput> {
+  if (!ML_SCORING_URL) {
+    return heuristicScore(inputs)
+  }
+
+  try {
+    const { data } = await axios.post<ScoringOutput>(ML_SCORING_URL, inputs, {
+      timeout: ML_SCORING_TIMEOUT_MS,
+    })
+    return data
+  } catch {
+    return heuristicScore(inputs)
+  }
 }

@@ -33,6 +33,13 @@ transfer-rumour-hub/
 │       │   └── scheduler.ts    # Cron: ingest + recompute
 │       └── sse/
 │           └── broadcaster.ts  # SSE client registry + broadcast
+├── ml-service/
+│   ├── app/
+│   │   ├── main.py             # FastAPI: POST /score, GET /health
+│   │   ├── heuristic.py        # Python port of likelihoodEngine.ts (breakdown + synthetic labels)
+│   │   └── model.py            # feature vector encoding, model load/save
+│   ├── train.py                 # --source synthetic (default) or db
+│   └── requirements.txt
 └── frontend/
     └── src/
         ├── app/                # Next.js App Router pages
@@ -78,7 +85,19 @@ npm install
 npm run dev               # http://localhost:3000
 ```
 
-### 4. Run together (from root)
+### 4. ML scoring service (optional)
+
+```bash
+cd ml-service
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+python train.py                          # writes model.joblib (synthetic-labeled, see roadmap)
+uvicorn app.main:app --port 8000
+```
+
+Set `ML_SCORING_URL="http://localhost:8000/score"` in `backend/.env` to use it. Leave unset (or let the process die) and the backend falls back to the built-in heuristic automatically — nothing else to configure.
+
+### 5. Run together (from root)
 
 ```bash
 npm install
@@ -137,7 +156,7 @@ Without a key the ingestion module returns stub rumours automatically.
 - [x] Auth (JWT + httpOnly cookie, own Credentials flow rather than NextAuth.js — backend already owns the DB and every other route, so session issuance lives in Express, not the Next app) — user watchlists (player-level, feed filter via `?watchlist=true`); notifications still open
 - [x] SSE hook in frontend — live TruthMeter updates without page refresh
 - [x] Admin panel — manually set rumour status (COMPLETED / FAILED / DENIED), gated on linked source evidence
-- [ ] ML scoring service — Python FastAPI + scikit-learn RandomForest trained on historic outcomes
+- [x] ML scoring service — `ml-service/` (FastAPI + scikit-learn RandomForest), backend calls it via `ML_SCORING_URL` with automatic fallback to the heuristic on error/timeout/unset. **Caveat:** as of 2026-08-12 the dev DB has only 6 rumours (5 PENDING, 1 COMPLETED) — nowhere near enough resolved outcomes to train a real classifier. The shipped model is trained on synthetic inputs labeled by the existing heuristic (`ml-service/train.py --source synthetic`, the default) — it stands up the service and swap path end-to-end but doesn't outperform the heuristic yet. Once resolved rumours (COMPLETED/FAILED/DENIED) pass 200, retrain with `--source db` to fit on real outcomes instead.
 - [x] More competitions — Champions League, Europa League, Europa Conference League, UEFA Super Cup (via Sportmonks sync); World Cup still open
 - [ ] Rumour sourcing — scrape additional providers (Football Italia, L'Equipe)
 - [ ] Mobile app — React Native sharing the same API

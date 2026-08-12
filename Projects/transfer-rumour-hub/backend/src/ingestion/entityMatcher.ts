@@ -406,7 +406,11 @@ function resolveDirection(
   text: string,
   clubs: EntityCache['clubs'],
   mentionedClubs: Array<{ id: number; name: string; score: number }>,
-): { fromClub: (typeof mentionedClubs)[0] | null; toClub: (typeof mentionedClubs)[0] | null } {
+): {
+  fromClub: (typeof mentionedClubs)[0] | null
+  toClub: (typeof mentionedClubs)[0] | null
+  fromClubInferred: boolean
+} {
   let fromClub: (typeof mentionedClubs)[0] | null = null
   let toClub: (typeof mentionedClubs)[0] | null = null
 
@@ -466,13 +470,22 @@ function resolveDirection(
 
   // Exactly two clubs in play and only one side resolved explicitly — the
   // other slot is unambiguous by elimination (e.g. "signs for Chelsea" with
-  // the old club named earlier but not via an explicit "from" phrase).
+  // the old club named earlier but not via an explicit "from" phrase). This
+  // is a weaker claim than an explicit cue: "the other mentioned club" is
+  // only actually the origin if both clubs belong to the same story (see
+  // rumour 135 — a digest headline can put two *unrelated* clubs in
+  // mentionedClubs). Callers should treat an elimination-derived fromClub as
+  // unconfirmed and prefer the player's real current club when they disagree.
+  let fromClubInferred = false
   if (mentionedClubs.length === 2) {
-    if (toClub && !fromClub) fromClub = mentionedClubs.find((c) => c.id !== toClub!.id) ?? null
+    if (toClub && !fromClub) {
+      fromClub = mentionedClubs.find((c) => c.id !== toClub!.id) ?? null
+      fromClubInferred = fromClub !== null
+    }
     if (fromClub && !toClub) toClub = mentionedClubs.find((c) => c.id !== fromClub!.id) ?? null
   }
 
-  return { fromClub, toClub }
+  return { fromClub, toClub, fromClubInferred }
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -482,6 +495,7 @@ export interface MatchedRumour {
   playerName: string
   fromClubId: number
   fromClubName: string
+  fromClubInferred: boolean
   toClubId: number
   toClubName: string
   headline: string
@@ -554,21 +568,49 @@ export async function extractRumoursFromText(
     // same span as window150 — safe to search in for the same mention.
     const window150Folded = mentionIdx === -1 ? foldedLower : foldedLower.slice(w150Start, w150End)
 
-    // Aggregator digests join several unrelated one-line stories with commas
-    // or " - " ("Rashford bombshell, Rodri to Barcelona, Arsenal update"), and
-    // 150 chars is wide enough to span into a neighbouring story — without this,
-    // the 2-club elimination fallback below can pair a club from a different
-    // headline fragment as if it were this player's from/to club. Narrow to
-    // just the comma/dash-delimited clause that actually contains the mention.
+    // Aggregator digests join several unrelated one-line stories with commas,
+    // " - ", or (for "roundup" question-style headlines) "?"/"!" ("Rashford
+    // bombshell, Rodri to Barcelona, Arsenal update" / "Balogun to Spurs?
+    // Pedro Neto to Manchester City?"), and 150 chars is wide enough to span
+    // into a neighbouring story — without this, the 2-club elimination
+    // fallback below can pair a club from a different headline fragment as
+    // if it were this player's from/to club (rumour 135: Balogun's fromClub
+    // resolved to Man City, which was actually Neto's toClub in the very
+    // next mini-headline). Narrow to just the delimited clause that actually
+    // contains the mention.
+    //
+    // The right-side "?"/"!" cut only fires when the clause up to that point
+    // already contains an explicit directional cue ("to"/"joins"/"from"/...).
+    // A bare rhetorical question mark ending a headline ("Could Spurs captain
+    // Romero join Arsenal?") is not a digest boundary — rumour 88 resolves
+    // its direction from a coincidental " to " further into the summary
+    // prose that follows, and cutting there unconditionally starved it of
+    // that text. Digest separators, by contrast, always look like "<Name> to
+    // <Club>?" — the cue precedes the punctuation.
+    const DIRECTION_CUES = [...TO_PREPOSITIONS, ...FROM_PREPOSITIONS]
     const windowText = ((): string => {
       const mIdx = rawLastName ? window150Folded.indexOf(foldAccents(rawLastName)) : -1
       if (mIdx === -1) return window150
-      const left = Math.max(window150.lastIndexOf(',', mIdx), window150.lastIndexOf(' - ', mIdx)) + 1
+      const left =
+        Math.max(
+          window150.lastIndexOf(',', mIdx),
+          window150.lastIndexOf(' - ', mIdx),
+          window150.lastIndexOf('?', mIdx),
+          window150.lastIndexOf('!', mIdx),
+        ) + 1
       let right = window150.length
       const rightComma = window150.indexOf(',', mIdx)
       if (rightComma !== -1) right = Math.min(right, rightComma)
       const rightDash = window150.indexOf(' - ', mIdx)
       if (rightDash !== -1) right = Math.min(right, rightDash)
+      for (const punct of ['?', '!']) {
+        const rightPunct = window150.indexOf(punct, mIdx)
+        if (rightPunct === -1) continue
+        const clauseLower = window150.slice(mIdx, rightPunct).toLowerCase()
+        if (DIRECTION_CUES.some((cue) => clauseLower.includes(cue))) {
+          right = Math.min(right, rightPunct)
+        }
+      }
       return window150.slice(left, right)
     })()
     const windowLower = windowText.toLowerCase()
@@ -584,7 +626,7 @@ export async function extractRumoursFromText(
 
     if (mentionedClubs.length < 2) continue
 
-    const { fromClub, toClub } = resolveDirection(windowLower, windowText, clubs, mentionedClubs)
+    const { fromClub, toClub, fromClubInferred } = resolveDirection(windowLower, windowText, clubs, mentionedClubs)
     if (!fromClub || !toClub || fromClub.id === toClub.id) continue
 
     results.push({
@@ -592,6 +634,7 @@ export async function extractRumoursFromText(
       playerName: player.name,
       fromClubId: fromClub.id,
       fromClubName: fromClub.name,
+      fromClubInferred,
       toClubId: toClub.id,
       toClubName: toClub.name,
       headline,
@@ -661,7 +704,7 @@ export async function extractRumoursFromText(
     const freshClubs = freshEntities.clubs
 
     const headlineLower = headline.toLowerCase()
-    const { fromClub, toClub } = resolveDirection(headlineLower, headline, freshClubs, mentionedClubs)
+    const { fromClub, toClub, fromClubInferred } = resolveDirection(headlineLower, headline, freshClubs, mentionedClubs)
     if (!fromClub || !toClub || fromClub.id === toClub.id) continue
 
     results.push({
@@ -669,6 +712,7 @@ export async function extractRumoursFromText(
       playerName: candidate.name,
       fromClubId: fromClub.id,
       fromClubName: fromClub.name,
+      fromClubInferred,
       toClubId: toClub.id,
       toClubName: toClub.name,
       headline,

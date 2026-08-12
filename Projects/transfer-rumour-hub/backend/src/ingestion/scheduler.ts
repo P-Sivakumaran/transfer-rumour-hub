@@ -24,7 +24,7 @@ async function recomputeAllLikelihoods(): Promise<void> {
       ? (contractEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
       : null
 
-    const { score } = computeScore({
+    const { score } = await computeScore({
       sourceReliability: r.source.reliabilityScore,
       monthsToContractExpiry: monthsToExpiry,
       reportedFeeMin: r.reportedFeeMin,

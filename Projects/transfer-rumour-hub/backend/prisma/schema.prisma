@@ -108,6 +108,14 @@ model Rumour {
   computedLikelihood  Float         @default(0)   // 0–100, from scoring engine
   status              RumourStatus  @default(PENDING)
   distinctSourceCount Int           @default(1)
+  // True when fromClub was assigned by the 2-club elimination fallback
+  // (only toClub had an explicit "to"/"joins" cue) rather than an explicit
+  // "from"/"leaves" cue in the text. An inferred fromClub can be wrong when
+  // the elimination picked up a club from an unrelated adjacent clause in a
+  // digest headline (see rumour 135 / entityMatcher.replay.ts) — the API and
+  // UI fall back to the player's actual current club when this is true and
+  // the two disagree, rather than asserting the inferred one as fact.
+  fromClubInferred    Boolean       @default(false)
   notes               String?
   contradicts         Int?          // id of a conflicting rumour (same player, different destination)
   createdAt           DateTime      @default(now())

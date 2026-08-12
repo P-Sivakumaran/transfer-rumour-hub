@@ -3,7 +3,7 @@ import { PrismaClient, type Prisma, RumourStatus } from '@prisma/client'
 const prisma = new PrismaClient()
 
 export const rumourInclude = {
-  player: true,
+  player: { include: { currentClub: true } },
   fromClub: true,
   toClub: true,
   source: true,
