@@ -83,11 +83,20 @@ const SportmonksCountrySchema = z.object({
 
 // A squad "membership" record — player identity/DOB/nationality only appear
 // when `include=player.nationality` is passed (verified; without it, only
-// player_id/position_id/contract dates come back).
-const SportmonksSquadMemberSchema = z.object({
+// player_id/position_id/contract dates come back). `end` is the contract
+// end date (verified live, 2026-08-13, against /squads/teams/591 both with
+// and without the include — present either way, e.g. "2028-06-30"). Was
+// fetched and discarded until now; feeds Player.contractEnd, which the
+// scoring engine's contract-urgency component otherwise stubs to a flat
+// "unknown" value for ~every player (5655/5671 had it null pre-fix).
+// `.nullish()` not `.nullable()`: only one team was checked live, and a
+// trialist/youth/loan row on some other team omitting the key entirely
+// (vs. sending it as null) would otherwise throw and fail that whole club's sync.
+export const SportmonksSquadMemberSchema = z.object({
   player_id: z.number(),
   position_id: z.number().nullable(),
   detailed_position_id: z.number().nullable(),
+  end: z.string().nullish(),
   player: z.object({
     id: z.number(),
     display_name: z.string(),
@@ -120,6 +129,7 @@ export interface NormalizedPlayer {
   position: Position | null
   nationality: string | null
   photoUrl: string | null
+  contractEnd: string | null // ISO date string, e.g. "2028-06-30"
 }
 
 function ageFromDob(dob: string | null): number | null {
@@ -205,6 +215,7 @@ async function fetchTeamSquad(teamExternalId: string): Promise<Omit<NormalizedPl
       position: positionId ? (DETAILED_POSITION_MAP[positionId] ?? null) : null,
       nationality: m.player.nationality?.name ?? null,
       photoUrl: m.player.image_path,
+      contractEnd: m.end ?? null,
     }
   })
 }

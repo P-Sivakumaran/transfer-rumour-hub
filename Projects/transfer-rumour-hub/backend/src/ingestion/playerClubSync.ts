@@ -100,7 +100,17 @@ export async function upsertClub(db: SyncDb, nc: NormalizedClub): Promise<number
   return created.id
 }
 
+// Sportmonks gives a plain date-only string ("2028-06-30"); `new Date(...)`
+// parses that as UTC midnight, which is fine here — contractEnd is only ever
+// compared in whole-day/month granularity (see monthsToContractExpiry).
+function parseContractEnd(contractEnd: string | null): Date | null {
+  if (!contractEnd) return null
+  const parsed = new Date(contractEnd)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
 export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClubId: number): Promise<number> {
+  const contractEnd = parseContractEnd(np.contractEnd)
   const byExternalId = await db.player.findFirst({ where: { externalId: np.externalId } })
   if (byExternalId) {
     await db.player.update({
@@ -112,6 +122,7 @@ export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClub
         currentClubId,
         nationality: np.nationality,
         photoUrl: np.photoUrl,
+        contractEnd,
       },
     })
     return byExternalId.id
@@ -129,6 +140,7 @@ export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClub
         currentClubId,
         nationality: np.nationality,
         photoUrl: np.photoUrl,
+        contractEnd,
       },
     })
     return adoptable[0].id
@@ -148,6 +160,7 @@ export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClub
       currentClubId,
       nationality: np.nationality,
       photoUrl: np.photoUrl,
+      contractEnd,
       autoCreated: false,
     },
   })

@@ -150,6 +150,7 @@ describe('upsertPlayer', () => {
       position: 'ST',
       nationality: 'Sweden',
       photoUrl: null,
+      contractEnd: '2028-06-30',
     }
 
     const id = await upsertPlayer(db, incoming, 42)
@@ -170,6 +171,7 @@ describe('upsertPlayer', () => {
       position: 'CM',
       nationality: 'France',
       photoUrl: null,
+      contractEnd: null,
     }
 
     await upsertPlayer(db, incoming, 42)
