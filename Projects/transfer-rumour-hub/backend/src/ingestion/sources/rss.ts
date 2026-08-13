@@ -8,9 +8,16 @@ const TRANSFER_KEYWORDS = [
   'loan', 'fee', 'rumour', 'rumor', 'target', 'linked', 'interest',
   'approach', 'negotiate', 'contract', 'here we go', 'medical',
   'agreed', 'swap', 'sell', 'buy', 'complete',
+  // L'Équipe's mercato section headlines are French — 'mercato' is the
+  // one word verified (2026-08-13) to appear on every real transfer
+  // headline in that feed, e.g. "Mercato : le capitaine de Tottenham
+  // Cristian Romero vers l'Atlético Madrid contre 40 M€" — none of the
+  // English keywords above match French transfer vocabulary otherwise,
+  // so without this every item from that source would get filtered out.
+  'mercato',
 ]
 
-function isTransferRelated(title: string, summary: string): boolean {
+export function isTransferRelated(title: string, summary: string): boolean {
   const text = `${title} ${summary}`.toLowerCase()
   return TRANSFER_KEYWORDS.some((kw) => text.includes(kw))
 }
@@ -104,6 +111,19 @@ export const RSS_FEEDS: Array<{ url: string; name: string; defaultReliability: n
     url: 'https://www.marca.com/en/rss/football.xml',
     name: 'Marca Football',
     defaultReliability: 0.70,
+  },
+  // Both verified live (2026-08-13, curl'd directly, real 200 + parseable RSS).
+  {
+    url: 'https://www.football-italia.net/feed',
+    name: 'Football Italia',
+    defaultReliability: 0.68,
+  },
+  {
+    // Scoped directly to L'Équipe's mercato (transfer) section, not the
+    // general football feed — found via the site's RSS API path, not guessed.
+    url: 'https://dwh.lequipe.fr/api/edito/rss?path=/Football/Transferts-football/',
+    name: "L'Équipe Mercato",
+    defaultReliability: 0.75,
   },
   // Google News — wide sweep across all outlets
   {

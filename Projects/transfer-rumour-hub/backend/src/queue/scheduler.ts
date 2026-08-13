@@ -40,6 +40,22 @@ export async function scheduleRecurringJobs(): Promise<void> {
     { name: 'player-sync', data: {} },
   )
 
+  // upsertJobScheduler only ever adds/updates — it never removes a scheduler
+  // for a feed that's since been renamed or deleted from RSS_FEEDS. Found
+  // live (2026-08-13): "Goal.com" and "Football365" kept firing every
+  // interval and 404ing forever, long after they'd been removed from the
+  // source array, because their `rss-<name>-recurring` schedulers were still
+  // sitting in Redis from whenever they were first registered. Sweep those
+  // orphans out on every boot instead of leaving them to run forever.
+  const currentRssSchedulerIds = new Set(RSS_FEEDS.map((f) => `rss-${f.name}-recurring`))
+  const existingSchedulers = await ingestQueue.getJobSchedulers()
+  for (const s of existingSchedulers) {
+    if (s.key.startsWith('rss-') && s.key.endsWith('-recurring') && !currentRssSchedulerIds.has(s.key)) {
+      await ingestQueue.removeJobScheduler(s.key)
+      console.log(`[scheduler] Removed orphaned RSS job scheduler: ${s.key}`)
+    }
+  }
+
   // Fire all sources immediately on startup
   await ingestQueue.add('sportmonks-boot', { source: 'sportmonks' })
   await playerSyncQueue.add('player-sync-boot', {})
