@@ -180,4 +180,45 @@ describe('upsertPlayer', () => {
     const created = player.rows.find((r) => r.externalId === 'sm-player-777')!
     expect(created.autoCreated).toBe(false)
   })
+
+  it('does not overwrite a known contractEnd when a later sync omits it (regression)', async () => {
+    const seeded: Row = { id: 1, externalId: 'P001', name: 'Viktor Gyökeres', currentClubId: null, contractEnd: new Date('2028-06-30') }
+    const { db, player } = makeFakeDb([], [seeded])
+    // SquadMemberSchema.end is nullish() — some squad rows (trialist/youth/
+    // loan) omit the key entirely, which upstream coerces to contractEnd: null.
+    const incoming: NormalizedPlayer = {
+      externalId: 'P001',
+      name: 'Viktor Gyökeres',
+      currentClubExternalId: 'sm-club-9',
+      age: 27,
+      position: 'ST',
+      nationality: 'Sweden',
+      photoUrl: null,
+      contractEnd: null,
+    }
+
+    await upsertPlayer(db, incoming, 42)
+
+    expect(player.rows[0].contractEnd).toEqual(new Date('2028-06-30'))
+    expect(player.rows[0].currentClubId).toBe(42) // other fields still update normally
+  })
+
+  it('does update contractEnd when the new sync actually has a value', async () => {
+    const seeded: Row = { id: 1, externalId: 'P001', name: 'Viktor Gyökeres', currentClubId: null, contractEnd: new Date('2027-01-01') }
+    const { db, player } = makeFakeDb([], [seeded])
+    const incoming: NormalizedPlayer = {
+      externalId: 'P001',
+      name: 'Viktor Gyökeres',
+      currentClubExternalId: 'sm-club-9',
+      age: 27,
+      position: 'ST',
+      nationality: 'Sweden',
+      photoUrl: null,
+      contractEnd: '2029-06-30',
+    }
+
+    await upsertPlayer(db, incoming, 42)
+
+    expect(player.rows[0].contractEnd).toEqual(new Date('2029-06-30'))
+  })
 })

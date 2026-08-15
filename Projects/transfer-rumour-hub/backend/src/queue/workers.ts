@@ -4,6 +4,7 @@ import { createRedisConnection } from './connection.js'
 import {
   scoreQueue, dedupeQueue, enrichQueue,
   type IngestJobData, type ScoreJobData, type DedupeJobData, type EnrichJobData, type PlayerSyncJobData,
+  type MaintenanceJobData,
 } from './queues.js'
 import { fetchLatestRumours } from '../ingestion/sportmonks.js'
 import { fetchRSSSignals, RSS_FEEDS } from '../ingestion/sources/rss.js'
@@ -14,6 +15,8 @@ import { broadcast } from '../sse/broadcaster.js'
 import { detectOutcome, applyOutcome } from '../ingestion/outcomeDetector.js'
 import { runPlayerEnrichment } from '../ingestion/enrichment.js'
 import { runPlayerClubSyncWithPrisma } from '../ingestion/playerClubSync.js'
+import { runRetentionPurge, type RetentionDb, type PurgeHealthDb } from '../analytics/retention.js'
+import { logOperationalEvent, type OperationalEventDb } from '../analytics/operationalEvents.js'
 
 const prisma = new PrismaClient()
 
@@ -384,6 +387,27 @@ async function processPlayerSync(_job: { data: PlayerSyncJobData }) {
   return result
 }
 
+// ─── Maintenance worker (public-beta readiness, 2026-08-14) ────────────────
+
+async function processMaintenance(job: { data: MaintenanceJobData }) {
+  if (job.data.task !== 'purge-product-events') return
+
+  const result = await runRetentionPurge(prisma as unknown as RetentionDb & PurgeHealthDb)
+  const opDb = prisma as unknown as OperationalEventDb
+
+  if (result.succeeded) {
+    console.log(`[worker:maintenance] Purged ${result.deletedCount} ProductEvent rows older than ${result.cutoff.toISOString()}.`)
+    await logOperationalEvent(opDb, { eventType: 'RETENTION_PURGE_SUCCESS', deletedCount: result.deletedCount })
+  } else {
+    console.error(`[worker:maintenance] Retention purge failed: ${result.error}`)
+    await logOperationalEvent(opDb, { eventType: 'RETENTION_PURGE_FAILURE', reason: result.error ?? 'unknown' })
+    // Surface the failure to BullMQ too (retried per the queue's own
+    // attempts/backoff config) — visible through the queue's own
+    // failed-job listing, on top of PurgeHealth and OperationalEvent.
+    throw new Error(result.error ?? 'Retention purge failed')
+  }
+}
+
 // ─── Start all workers ──────────────────────────────────────────────────────
 
 export function startWorkers(): void {
@@ -394,5 +418,6 @@ export function startWorkers(): void {
   new Worker<EnrichJobData>('enrich', processEnrich as any, { connection: conn, concurrency: 1 }) // 1 at a time to be polite to Wikidata
   // concurrency 1 — a second overlapping run could race on the adopt-by-name reconciliation step
   new Worker<PlayerSyncJobData>('player-sync', processPlayerSync as any, { connection: conn, concurrency: 1 })
-  console.log('[workers] Ingest, score, dedupe, enrich, player-sync workers started.')
+  new Worker<MaintenanceJobData>('maintenance', processMaintenance as any, { connection: conn, concurrency: 1 })
+  console.log('[workers] Ingest, score, dedupe, enrich, player-sync, maintenance workers started.')
 }

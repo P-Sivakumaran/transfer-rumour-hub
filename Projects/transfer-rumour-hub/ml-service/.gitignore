@@ -2,4 +2,7 @@ venv/
 __pycache__/
 *.pyc
 model.joblib
+forecast_model.joblib
+forecast_model_metadata.json
+.pytest_cache/
 .env

@@ -111,6 +111,16 @@ function parseContractEnd(contractEnd: string | null): Date | null {
 
 export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClubId: number): Promise<number> {
   const contractEnd = parseContractEnd(np.contractEnd)
+  // Only overwrite an existing row's contractEnd when this fetch actually
+  // has a value — SquadMemberSchema.end is nullish() because some squad
+  // rows (trialist/youth/loan) omit the key entirely, and contractEnd feeds
+  // monthsToContractExpiry in three downstream consumers
+  // (ingestion/scheduler.ts, queue/workers.ts, forecasting/featureSnapshot.ts).
+  // Writing it unconditionally meant a sync where this player's row happened
+  // to lack `end` would silently null out a contract date learned on a
+  // previous sync. Not applied to player.create below: a brand-new row has
+  // no prior value to preserve, so null there is a legitimate "no data yet".
+  const contractEndUpdate = contractEnd !== null ? { contractEnd } : {}
   const byExternalId = await db.player.findFirst({ where: { externalId: np.externalId } })
   if (byExternalId) {
     await db.player.update({
@@ -122,7 +132,7 @@ export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClub
         currentClubId,
         nationality: np.nationality,
         photoUrl: np.photoUrl,
-        contractEnd,
+        ...contractEndUpdate,
       },
     })
     return byExternalId.id
@@ -140,7 +150,7 @@ export async function upsertPlayer(db: SyncDb, np: NormalizedPlayer, currentClub
         currentClubId,
         nationality: np.nationality,
         photoUrl: np.photoUrl,
-        contractEnd,
+        ...contractEndUpdate,
       },
     })
     return adoptable[0].id

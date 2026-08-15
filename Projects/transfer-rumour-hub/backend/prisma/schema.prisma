@@ -8,44 +8,47 @@ datasource db {
 }
 
 model Club {
-  id               Int       @id @default(autoincrement())
-  externalId       String?   @unique
-  name             String
-  shortName        String?
-  league           String    @default("Unknown")
-  country          String    @default("Unknown")
-  logoUrl          String?
-  autoCreated      Boolean   @default(false)
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id          Int      @id @default(autoincrement())
+  externalId  String?  @unique
+  name        String
+  shortName   String?
+  league      String   @default("Unknown")
+  country     String   @default("Unknown")
+  logoUrl     String?
+  autoCreated Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  players          Player[]
-  rumoursFrom      Rumour[]  @relation("FromClub")
-  rumoursTo        Rumour[]  @relation("ToClub")
+  players     Player[]
+  rumoursFrom Rumour[] @relation("FromClub")
+  rumoursTo   Rumour[] @relation("ToClub")
+  claimsFrom  Claim[]  @relation("ClaimFromClub")
+  claimsTo    Claim[]  @relation("ClaimToClub")
 
   @@map("clubs")
 }
 
 model Player {
-  id              Int       @id @default(autoincrement())
-  externalId      String?   @unique
-  name            String
-  age             Int?
-  position        Position?
-  currentClubId   Int?
-  contractEnd     DateTime?
-  marketValue     Float?    // in millions EUR
-  nationality     String?
-  photoUrl        String?
-  autoCreated     Boolean   @default(false)
-  wikidataId      String?   // Wikidata entity QID (e.g. "Q59306386")
-  enrichedAt      DateTime? // when Wikidata enrichment last ran
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id            Int       @id @default(autoincrement())
+  externalId    String?   @unique
+  name          String
+  age           Int?
+  position      Position?
+  currentClubId Int?
+  contractEnd   DateTime?
+  marketValue   Float? // in millions EUR
+  nationality   String?
+  photoUrl      String?
+  autoCreated   Boolean   @default(false)
+  wikidataId    String? // Wikidata entity QID (e.g. "Q59306386")
+  enrichedAt    DateTime? // when Wikidata enrichment last ran
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  currentClub     Club?     @relation(fields: [currentClubId], references: [id])
-  rumours         Rumour[]
-  watchlistedBy   WatchlistPlayer[]
+  currentClub   Club?             @relation(fields: [currentClubId], references: [id])
+  rumours       Rumour[]
+  watchlistedBy WatchlistPlayer[]
+  claims        Claim[]
 
   @@map("players")
 }
@@ -57,16 +60,46 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  watchlist    WatchlistPlayer[]
+  // Monetisation entitlement model (2026-08-14) — see
+  // docs/monetisation-proposal.md. `tier` is the only thing entitlement
+  // checks read; `entitlementSource` exists so a future billing provider
+  // can be distinguished from a manual admin grant without a schema change
+  // (only MANUAL is ever written by this codebase today — no payment
+  // provider integration exists yet, by design for this task).
+  tier                 EntitlementTier   @default(FREE)
+  entitlementSource    EntitlementSource @default(MANUAL)
+  entitlementGrantedAt DateTime?
+
+  // Public-beta readiness (2026-08-14) — see docs/public-beta-readiness-audit.md.
+  // Default USER; promoted to ADMIN only via the BOOTSTRAP_ADMIN_EMAIL
+  // startup hook (adminBootstrap.ts) or by an existing ADMIN granting it —
+  // never by a user acting on themself, see requireAdmin/adminController.
+  role Role @default(USER)
+
+  watchlist               WatchlistPlayer[]
+  productEvents           ProductEvent[]
+  apiKeys                 ApiKey[]
+  adminAuditEventsActed   AdminAuditEvent[] @relation("AdminAuditActor")
+  adminAuditEventsTargeted AdminAuditEvent[] @relation("AdminAuditTarget")
 
   @@map("users")
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
 model WatchlistPlayer {
-  id        Int      @id @default(autoincrement())
+  id        Int       @id @default(autoincrement())
   userId    Int
   playerId  Int
-  createdAt DateTime @default(now())
+  // Instant-alert entitlement stub (2026-08-14) — a preference only. No
+  // delivery mechanism (email/push/webhook) exists anywhere in this
+  // codebase; setting INSTANT here does not cause a notification to be
+  // sent. See docs/monetisation-proposal.md "Limitations".
+  alertMode AlertMode @default(DELAYED)
+  createdAt DateTime  @default(now())
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
@@ -75,39 +108,103 @@ model WatchlistPlayer {
   @@map("watchlist_players")
 }
 
-model Source {
-  id               Int       @id @default(autoincrement())
-  name             String    @unique
-  type             SourceType
-  reliabilityScore Float     @default(0.5) // 0.0 – 1.0
-  hitCount         Int       @default(0)   // rumours that completed
-  missCount        Int       @default(0)   // rumours that failed/denied
-  country          String?
-  url              String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+enum EntitlementTier {
+  FREE
+  PRO
+  RESEARCH
+}
 
-  rumours          Rumour[]
+enum EntitlementSource {
+  MANUAL
+}
+
+enum AlertMode {
+  DELAYED
+  INSTANT
+}
+
+enum ProductEventType {
+  WATCHLIST_CREATED
+  ALERT_ACTIVATED
+  PROVENANCE_PANEL_VIEWED
+  FORECAST_HISTORY_VIEWED
+  UPGRADE_INTEREST_CLICKED
+}
+
+// Privacy-conscious product-analytics log (2026-08-14) — internal only,
+// never sent to a third-party SDK. `userId` is a real nullable FK, not a
+// pseudonym: this app already ties comparable behavioral data (watchlist
+// contents) to userId, so a separate pseudonym scheme would add complexity
+// without adding privacy. Nullable because upgrade-interest clicks can
+// happen from an anonymous session. `metadata` deliberately never contains
+// a claimId/playerId for panel-view events — see
+// docs/monetisation-proposal.md "Privacy and data-licensing considerations"
+// for why under-collection was chosen there. Retention: purgeOldProductEvents()
+// in backend/src/analytics/retention.ts deletes rows older than 90 days —
+// not wired to a live cron in this implementation, see that file's comment.
+model ProductEvent {
+  id        Int              @id @default(autoincrement())
+  userId    Int?
+  eventType ProductEventType
+  metadata  Json?
+  createdAt DateTime         @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([eventType, createdAt])
+  @@index([userId])
+  @@map("product_events")
+}
+
+model Source {
+  id                 Int                @id @default(autoincrement())
+  name               String             @unique
+  type               SourceType
+  reliabilityScore   Float              @default(0.5) // 0.0 – 1.0
+  hitCount           Int                @default(0) // rumours that completed
+  missCount          Int                @default(0) // rumours that failed/denied
+  country            String?
+  url                String?
+  // Source-quality metadata — evidence-model fields (2026-08-14). Distinct
+  // from `reliabilityScore`/`hitCount`/`missCount` above, which are the
+  // existing outcome-derived trust signal for the Rumour/entityMatcher
+  // pipeline. These are editorial/manual classification, not statistics.
+  tier               Int? // 1 (best) – 5 (worst); matches the "Tier N"
+  // convention rss.ts already parses out of
+  // community post titles (extractTierFromTitle).
+  journalistHandle   String? // byline / social handle, when the source IS a
+  // named journalist rather than an outlet.
+  leagueCoverage     Json? // array of league/competition names this
+  // source specializes in, e.g. ["Serie A"].
+  // Null = general/unclassified coverage.
+  manualReviewStatus SourceReviewStatus @default(UNREVIEWED)
+  profileVersion     Int                @default(1) // bump whenever tier/type/coverage
+  // is edited by a human reviewer.
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  rumours       Rumour[]
+  evidenceItems EvidenceItem[]
 
   @@map("sources")
 }
 
 model Rumour {
-  id                  Int           @id @default(autoincrement())
-  externalId          String?       @unique
+  id                  Int            @id @default(autoincrement())
+  externalId          String?        @unique
   playerId            Int
   fromClubId          Int
   toClubId            Int
   sourceId            Int
-  reportedFeeMin      Float?        // millions EUR
+  reportedFeeMin      Float? // millions EUR
   reportedFeeMax      Float?
-  currency            String        @default("EUR")
-  rumourDate          DateTime      @default(now())
+  currency            String         @default("EUR")
+  rumourDate          DateTime       @default(now())
   window              TransferWindow
-  baseProbability     Float         @default(0.5) // raw from provider
-  computedLikelihood  Float         @default(0)   // 0–100, from scoring engine
-  status              RumourStatus  @default(PENDING)
-  distinctSourceCount Int           @default(1)
+  baseProbability     Float          @default(0.5) // raw from provider
+  computedLikelihood  Float          @default(0) // 0–100, from scoring engine
+  status              RumourStatus   @default(PENDING)
+  distinctSourceCount Int            @default(1)
   // True when fromClub was assigned by the 2-club elimination fallback
   // (only toClub had an explicit "to"/"joins" cue) rather than an explicit
   // "from"/"leaves" cue in the text. An inferred fromClub can be wrong when
@@ -115,31 +212,31 @@ model Rumour {
   // digest headline (see rumour 135 / entityMatcher.replay.ts) — the API and
   // UI fall back to the player's actual current club when this is true and
   // the two disagree, rather than asserting the inferred one as fact.
-  fromClubInferred    Boolean       @default(false)
+  fromClubInferred    Boolean        @default(false)
   notes               String?
-  contradicts         Int?          // id of a conflicting rumour (same player, different destination)
-  createdAt           DateTime      @default(now())
-  updatedAt           DateTime      @updatedAt
+  contradicts         Int? // id of a conflicting rumour (same player, different destination)
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
 
-  player    Player  @relation(fields: [playerId], references: [id])
-  fromClub  Club    @relation("FromClub", fields: [fromClubId], references: [id])
-  toClub    Club    @relation("ToClub", fields: [toClubId], references: [id])
-  source    Source  @relation(fields: [sourceId], references: [id])
+  player   Player @relation(fields: [playerId], references: [id])
+  fromClub Club   @relation("FromClub", fields: [fromClubId], references: [id])
+  toClub   Club   @relation("ToClub", fields: [toClubId], references: [id])
+  source   Source @relation(fields: [sourceId], references: [id])
 
-  contradictsRel  Rumour?  @relation("RumourContradiction", fields: [contradicts], references: [id])
-  contradictedBy  Rumour[] @relation("RumourContradiction")
-  history         RumourHistory[]
+  contradictsRel Rumour?         @relation("RumourContradiction", fields: [contradicts], references: [id])
+  contradictedBy Rumour[]        @relation("RumourContradiction")
+  history        RumourHistory[]
 
   @@map("rumours")
 }
 
 // Append-only log of likelihood changes — powers the timeline chart
 model RumourHistory {
-  id                 Int      @id @default(autoincrement())
+  id                 Int          @id @default(autoincrement())
   rumourId           Int
   computedLikelihood Float
   status             RumourStatus
-  recordedAt         DateTime @default(now())
+  recordedAt         DateTime     @default(now())
 
   rumour Rumour @relation(fields: [rumourId], references: [id])
 
@@ -150,18 +247,18 @@ model RumourHistory {
 // Raw ingest log — every headline seen, matched or not.
 // Powers future NLP training set and audit trail.
 model RawSignal {
-  id                  Int       @id @default(autoincrement())
-  sourceName          String
-  feedUrl             String
-  headline            String
-  summary             String    @db.Text
-  link                String
-  publishedAt         DateTime
-  rawText             String    @db.Text
-  impliedReliability  Float?
-  matched             Boolean   @default(false)
-  rumourId            Int?
-  createdAt           DateTime  @default(now())
+  id                 Int      @id @default(autoincrement())
+  sourceName         String
+  feedUrl            String
+  headline           String
+  summary            String   @db.Text
+  link               String
+  publishedAt        DateTime
+  rawText            String   @db.Text
+  impliedReliability Float?
+  matched            Boolean  @default(false)
+  rumourId           Int?
+  createdAt          DateTime @default(now())
 
   @@index([sourceName, publishedAt])
   @@index([matched])
@@ -202,8 +299,426 @@ enum TransferWindow {
 
 enum RumourStatus {
   PENDING
-  HOT        // likelihood > 70
+  HOT // likelihood > 70
   COMPLETED
   FAILED
   DENIED
+}
+
+// ─── Provenance-first evidence model (2026-08-14) ───────────────────────────
+//
+// Claim + EvidenceItem are a second, parallel representation of a transfer
+// assertion, additive alongside Rumour/RawSignal — nothing above this line
+// changes meaning or behavior. Not yet populated by live ingestion: workers.ts
+// still only writes Rumour/RawSignal. The entry point for wiring this in is
+// `ingestEvidenceItem()` (backend/src/evidence/evidenceService.ts) — see
+// README "Picking this up in a new session" for what's left.
+//
+// Independent-corroboration model: every EvidenceItem has a non-null
+// `provenanceRootId` once ingestion finishes — a standalone item points to
+// itself (self-referential), items chained by explicit attribution inherit
+// their parent's root. "Distinct provenance roots for a claim" is therefore
+// just `COUNT(DISTINCT provenanceRootId)` over that claim's evidence, with no
+// NULL handling needed anywhere that number is used.
+
+enum TransferType {
+  PERMANENT
+  LOAN
+  FREE
+  UNKNOWN
+}
+
+enum ClaimStatus {
+  ACTIVE
+  DENIED
+  SUPERSEDED
+  CONFIRMED
+  EXPIRED
+}
+
+enum EvidenceDirection {
+  SUPPORTS
+  CONTRADICTS
+  CONFIRMS
+  DENIES
+  CONTEXTUAL
+}
+
+enum SourceReviewStatus {
+  UNREVIEWED
+  APPROVED
+  FLAGGED
+}
+
+model Claim {
+  id                         Int             @id @default(autoincrement())
+  playerId                   Int
+  fromClubId                 Int?
+  toClubId                   Int?
+  transferType               TransferType    @default(UNKNOWN)
+  statedFee                  Float? // millions EUR, same unit as Rumour.reportedFeeMin/Max
+  // Months, not years — journalism reports years ("a five-year deal") and
+  // outcomeDetector.ts already extracts year-scale phrasing elsewhere in this
+  // codebase. Convert years*12 at the ingestion boundary; never store a raw
+  // year count here (same failure shape as the contractEnd unit bug fixed
+  // 2026-08-13 — see README).
+  statedContractLengthMonths Int?
+  claimStatus                ClaimStatus     @default(ACTIVE)
+  // Added 2026-08-14 for the forecasting pipeline — the label/feature logic
+  // needs an actual transfer-window cutoff to bound "before the window
+  // closes", and nothing upstream (guessWindow() in rss.ts/sportmonks.ts/
+  // apifootball.ts) persisted one anywhere before now. Nullable: existing
+  // claims and FREE_AGENT-type claims may not have a meaningful window.
+  window                     TransferWindow?
+  firstSeenAt                DateTime        @default(now())
+  lastEvidenceAt             DateTime        @default(now())
+  createdAt                  DateTime        @default(now())
+  updatedAt                  DateTime        @updatedAt
+
+  player         Player          @relation(fields: [playerId], references: [id])
+  fromClub       Club?           @relation("ClaimFromClub", fields: [fromClubId], references: [id])
+  toClub         Club?           @relation("ClaimToClub", fields: [toClubId], references: [id])
+  evidence       EvidenceItem[]
+  claimForecasts ClaimForecast[]
+
+  @@index([playerId, fromClubId, toClubId])
+  @@index([claimStatus])
+  @@map("claims")
+}
+
+model EvidenceItem {
+  id                    Int               @id @default(autoincrement())
+  claimId               Int
+  sourceId              Int
+  canonicalUrl          String
+  publishedAt           DateTime
+  fetchedAt             DateTime          @default(now())
+  authorName            String?
+  // Denormalized snapshot of Source.type at ingestion time — same reasoning
+  // as RawSignal.sourceName being a copy rather than a live join: what type
+  // the source WAS classified as when this evidence was captured shouldn't
+  // silently change if the Source row is reclassified later.
+  sourceType            SourceType
+  title                 String
+  rawExcerpt            String            @db.Text
+  extractedAttributions Json? // e.g. [{ name: "Fabrizio Romano", quoted: true }]
+  evidenceDirection     EvidenceDirection @default(SUPPORTS)
+  // Explicit citation link ("according to X") — set only when the text names
+  // another source AND that source's own EvidenceItem for this claim can be
+  // found. Distinct from provenanceRootId: this is the literal citation
+  // graph edge; provenanceRootId is the resolved cluster anchor.
+  parentEvidenceItemId  Int?
+  // Nullable only for the instant between insert and the self-assign update
+  // in ingestEvidenceItem() — see enum block comment above. Every row is
+  // expected non-null once ingestion completes.
+  provenanceRootId      Int?
+  extractionConfidence  Float             @default(0) // 0.0–1.0
+  createdAt             DateTime          @default(now())
+
+  claim                   Claim                        @relation(fields: [claimId], references: [id])
+  source                  Source                       @relation(fields: [sourceId], references: [id])
+  parentEvidenceItem      EvidenceItem?                @relation("EvidenceAttribution", fields: [parentEvidenceItemId], references: [id])
+  attributedChildren      EvidenceItem[]               @relation("EvidenceAttribution")
+  provenanceRoot          EvidenceItem?                @relation("ProvenanceCluster", fields: [provenanceRootId], references: [id])
+  provenanceChildren      EvidenceItem[]               @relation("ProvenanceCluster")
+  duplicateCandidatesFrom EvidenceDuplicateCandidate[] @relation("DuplicateCandidateSource")
+  duplicateCandidatesOf   EvidenceDuplicateCandidate[] @relation("DuplicateCandidateTarget")
+
+  // Same URL re-ingested for the SAME claim is the "exact match = duplicate"
+  // case (requirement 4a) — enforced here, handled non-destructively by
+  // ingestEvidenceItem() (upsert-style: existing row wins, only fetchedAt
+  // advances). Deliberately NOT globally unique on canonicalUrl alone: one
+  // digest article ("Rashford bombshell, Rodri to Barcelona, Arsenal update")
+  // is real evidence for multiple distinct claims at once — see
+  // entityMatcher.replay.ts for real examples of this exact shape.
+  @@unique([canonicalUrl, claimId])
+  @@index([claimId])
+  @@index([provenanceRootId])
+  @@index([sourceId])
+  @@map("evidence_items")
+}
+
+// Near-duplicate title/body matches (requirement 4b) — logged as a candidate
+// for review, never auto-merged and never a delete. Promoting one to an
+// actual shared provenanceRootId is a deliberate, separate write
+// (resolveDuplicateCandidate() in evidenceService.ts), not something
+// similarity-scoring alone is allowed to do.
+model EvidenceDuplicateCandidate {
+  id              Int       @id @default(autoincrement())
+  evidenceItemId  Int
+  candidateItemId Int
+  similarityScore Float // 0.0–1.0
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+
+  evidenceItem  EvidenceItem @relation("DuplicateCandidateSource", fields: [evidenceItemId], references: [id])
+  candidateItem EvidenceItem @relation("DuplicateCandidateTarget", fields: [candidateItemId], references: [id])
+
+  @@unique([evidenceItemId, candidateItemId])
+  @@map("evidence_duplicate_candidates")
+}
+
+// ─── Calibrated forecasting pipeline (2026-08-14) ───────────────────────────
+//
+// Second migration on top of the evidence model above — that migration was
+// already applied to the dev DB before this work started, so `window` on
+// Claim and everything below ships as its own additive migration rather
+// than being folded into the first one. See docs/forecasting-methodology.md.
+//
+// Critical product rule this schema exists to enforce: a displayed
+// completion probability must be empirically calibrated against resolved
+// outcomes, not a repackaged evidence-strength score. ClaimForecast's
+// `displayMode` is the enforcement point — PRECISE is only ever written
+// when a ModelVersion with a real calibration curve backs it.
+
+// A versioned, persisted definition of the forecast target itself
+// ("official confirmation within N days or before the window cutoff").
+// Immutable once created — redefining N or the cutoff dates creates a new
+// version rather than mutating this one, so every ClaimForecast/ModelVersion
+// stays attributable to the exact target definition it was produced under.
+model ForecastDefinition {
+  id      Int @id @default(autoincrement())
+  version Int @unique
+
+  horizonDays Int // N in "within N days"
+
+  // MM-DD, configurable approximation of when each window closes — no real
+  // cutoff-date concept existed anywhere in this codebase before this
+  // migration (only month-based guessWindow() heuristics in rss.ts/
+  // sportmonks.ts/apifootball.ts). Real transfer windows vary by
+  // competition/season; this is a deliberate simplification, not a source
+  // of truth — see docs/forecasting-methodology.md "Limitations".
+  summerCutoffMonthDay String @default("08-31")
+  winterCutoffMonthDay String @default("01-31")
+
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  modelVersions  ModelVersion[]
+  claimForecasts ClaimForecast[]
+
+  @@map("forecast_definitions")
+}
+
+// One row per trained/calibrated model artifact. `isCurrent` marks the
+// model live traffic uses; older rows are kept for audit/drift comparison,
+// never deleted or overwritten in place.
+model ModelVersion {
+  id                   Int    @id @default(autoincrement())
+  forecastDefinitionId Int
+  version              String @unique // e.g. "forecast-v1-synthetic-20260814T0130"
+
+  trainedAt          DateTime @default(now())
+  trainingDataSource String // 'synthetic' | 'db' — see train_forecast.py
+
+  nTrainSamples Int
+  nTestSamples  Int
+  // Time-based split boundaries (requirement 3) — never a random split.
+  trainStart    DateTime?
+  trainEnd      DateTime?
+  testStart     DateTime?
+  testEnd       DateTime?
+
+  // Out-of-sample evaluation metrics (requirement 4/5) — computed on the
+  // held-out test split only, never in-sample.
+  brierScore       Float?
+  logLoss          Float?
+  calibrationCurve Json? // bin stats: [{ binLow, binHigh, meanPredicted, empiricalRate, n }]
+
+  // Below this, the acceptance gate (requirement 5) refuses PRECISE display
+  // regardless of what the model outputs — see forecastService.ts.
+  minSampleSizeForPrecise Int @default(200) // matches ml-service/train.py's
+  // existing MIN_REAL_SAMPLES convention for the (separate) likelihood model
+
+  isCurrent Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  forecastDefinition ForecastDefinition @relation(fields: [forecastDefinitionId], references: [id])
+  claimForecasts     ClaimForecast[]
+
+  @@index([forecastDefinitionId, isCurrent])
+  @@map("model_versions")
+}
+
+enum ForecastDisplayMode {
+  PRECISE // calibrated probability + uncertainty band
+  INTERVAL // broad interval only, not a point estimate
+  INSUFFICIENT_DATA // no number displayed at all
+}
+
+// One row per (claim, as-of timestamp) prediction — append-only, never
+// updated in place, so a claim's forecast history is reconstructable.
+model ClaimForecast {
+  id                   Int  @id @default(autoincrement())
+  claimId              Int
+  forecastDefinitionId Int
+  modelVersionId       Int? // null when displayMode is INSUFFICIENT_DATA
+
+  predictionTimestamp DateTime @default(now())
+
+  // The exact feature vector used, plus its hash — persisted so a past
+  // prediction is auditable/reproducible without re-deriving it from
+  // (possibly since-changed) evidence rows.
+  featureSnapshot     Json
+  featureSnapshotHash String
+
+  rawScore              Float? // pre-calibration model output
+  calibratedProbability Float?
+  uncertaintyLow        Float?
+  uncertaintyHigh       Float?
+
+  displayMode            ForecastDisplayMode @default(INSUFFICIENT_DATA)
+  insufficientDataReason String?
+
+  createdAt DateTime @default(now())
+
+  claim              Claim              @relation(fields: [claimId], references: [id])
+  forecastDefinition ForecastDefinition @relation(fields: [forecastDefinitionId], references: [id])
+  modelVersion       ModelVersion?      @relation(fields: [modelVersionId], references: [id])
+
+  @@index([claimId, predictionTimestamp])
+  @@map("claim_forecasts")
+}
+
+// ─── Public-beta readiness (2026-08-14) ─────────────────────────────────────
+// See docs/public-beta-readiness-audit.md for the full design rationale.
+// Role-based admin, Research API keys, and operational observability —
+// additive alongside the monetisation model above, no existing table's
+// meaning changes.
+
+enum AdminActionType {
+  ENTITLEMENT_GRANT
+}
+
+// Immutable audit trail for privileged admin actions — append-only,
+// deliberately never updated or deleted by application code (no
+// update/delete call exists anywhere in adminService.ts). Never stores
+// tokens or secrets — see docs/admin-operations.md.
+model AdminAuditEvent {
+  id                Int                @id @default(autoincrement())
+  actingAdminUserId Int
+  actionType        AdminActionType
+  targetUserId      Int
+  previousTier      EntitlementTier?
+  newTier           EntitlementTier?
+  entitlementSource EntitlementSource?
+  correlationId     String?
+  createdAt         DateTime           @default(now())
+
+  actingAdmin User @relation("AdminAuditActor", fields: [actingAdminUserId], references: [id])
+  targetUser  User @relation("AdminAuditTarget", fields: [targetUserId], references: [id])
+
+  @@index([targetUserId, createdAt])
+  @@index([actingAdminUserId, createdAt])
+  @@map("admin_audit_events")
+}
+
+enum ApiKeyScope {
+  RESEARCH_READ
+  RESEARCH_EXPORT
+}
+
+// Raw key material is never stored — see apiKeys/hashing.ts. `keyPrefix` is
+// the public, indexed lookup column (shown to the user permanently);
+// `secretHash` is a SHA-256 hex digest of the secret portion, compared with
+// crypto.timingSafeEqual, never with `===`. SHA-256, not bcrypt: the secret
+// is high-entropy (generated, not user-chosen) and must be looked up
+// deterministically by hash, which a per-row-salted bcrypt hash can't do
+// without scanning every row.
+model ApiKey {
+  id         Int           @id @default(autoincrement())
+  userId     Int
+  keyPrefix  String        @unique
+  secretHash String
+  name       String
+  scopes     ApiKeyScope[]
+  createdAt  DateTime      @default(now())
+  lastUsedAt DateTime?
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+
+  user  User               @relation(fields: [userId], references: [id])
+  usage ApiKeyUsageEvent[]
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+enum ApiEndpointCategory {
+  HISTORICAL_CLAIMS
+  EVIDENCE_METADATA
+}
+
+enum ApiResponseClass {
+  SUCCESS
+  UNAUTHORIZED
+  FORBIDDEN
+  RATE_LIMITED
+}
+
+// Privacy-minimized API usage log (requirement: "key ID, endpoint category,
+// response class, timestamp, rate-limit state" — nothing else). `apiKeyId`
+// is null for an unknown/invalid key: there is no row to attribute the
+// attempt to, and the presented key material is never logged, valid or
+// not. No request body, no raw URL, no claimId/playerId — see
+// apiKeys/service.ts recordUsage().
+model ApiKeyUsageEvent {
+  id               Int                 @id @default(autoincrement())
+  apiKeyId         Int?
+  endpointCategory ApiEndpointCategory
+  responseClass    ApiResponseClass
+  rateLimitState   Json?
+  createdAt        DateTime            @default(now())
+
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([apiKeyId, createdAt])
+  @@map("api_key_usage_events")
+}
+
+enum OperationalEventType {
+  ENTITLEMENT_DENIED
+  FEATURE_FLAG_DENIED
+  WATCHLIST_CAP_REACHED
+  API_KEY_ACCEPTED
+  API_KEY_REJECTED
+  API_KEY_RATE_LIMITED
+  ADMIN_TIER_GRANT_SUCCESS
+  ADMIN_TIER_GRANT_FAILURE
+  RETENTION_PURGE_SUCCESS
+  RETENTION_PURGE_FAILURE
+}
+
+// Security/operational log — deliberately separate from ProductEvent
+// (product analytics). No userId FK: these are structured diagnostic
+// events tied to a request via correlationId, not a per-user behavioral
+// log. `detail` is constrained by analytics/operationalEvents.ts's typed
+// logging function, not by Prisma — see that file for why claimId/playerId
+// can't reach this table even if a caller tried to pass them.
+model OperationalEvent {
+  id            Int                  @id @default(autoincrement())
+  eventType     OperationalEventType
+  correlationId String?
+  detail        Json?
+  createdAt     DateTime             @default(now())
+
+  @@index([eventType, createdAt])
+  @@map("operational_events")
+}
+
+// Single upserted row (id fixed to 1), not an append-only log — an
+// unbounded "purge run history" table would just recreate the retention
+// problem this whole task is closing elsewhere. See analytics/retention.ts.
+model PurgeHealth {
+  id                 Int       @id @default(1)
+  lastRunStartedAt   DateTime?
+  lastRunCompletedAt DateTime?
+  lastRunSucceeded   Boolean?
+  lastDeletedCount   Int?
+  lastCutoff         DateTime?
+  lastError          String?
+  updatedAt          DateTime  @updatedAt
+
+  @@map("purge_health")
 }

@@ -374,8 +374,17 @@ async function autoCreateClub(name: string): Promise<number | null> {
 
 // ─── Direction resolution ────────────────────────────────────────────────────
 
-const TO_PREPOSITIONS = [' to ', ' joins ', ' signs for ', ' moves to ', ' heading to ']
-const FROM_PREPOSITIONS = [' from ', ' leaves ', ' leave ', ' departs ', ' exits ']
+// French cues added for L'Équipe's mercato feed (isTransferRelated's
+// 'mercato' keyword, rss.ts) — without these, that feed's headlines pass
+// the topic filter and get written as RawSignal rows but never resolve to
+// an actual Rumour, since this cue list is the only thing that assigns a
+// direction. Kept deliberately narrow (no bare 'pour' — see the
+// quitte-X-pour-Y block below) since these cues are scoped to
+// candidateClubs (only clubs already confirmed mentioned nearby), which
+// bounds the false-positive risk of a common word like 'rejoint'/'quitte'
+// the same way the English cues are already bounded.
+const TO_PREPOSITIONS = [' to ', ' joins ', ' signs for ', ' moves to ', ' heading to ', ' rejoint ']
+const FROM_PREPOSITIONS = [' from ', ' leaves ', ' leave ', ' departs ', ' exits ', ' quitte ', ' quittent ']
 
 // Verbs that commonly follow a bare " to " as an infinitive marker rather
 // than a destination ("Romero **to leave** Spurs for Arsenal") — without this
@@ -401,7 +410,7 @@ const FROM_ATTRIBUTION_PRECEDING = /\b(reports?|news|sources?|according)\s*$/i
 // ("joins X", "from Y") near a club mention. When neither slot resolves this
 // way, we return null rather than guess from mention order — a rumour with a
 // fabricated direction is worse than no rumour.
-function resolveDirection(
+export function resolveDirection(
   lower: string,
   text: string,
   clubs: EntityCache['clubs'],
@@ -435,12 +444,23 @@ function resolveDirection(
   // "leave X for Y" — very common transfer-journalism phrasing where X is the
   // origin and Y (after "for") is the destination. Resolved first because the
   // generic " to " cue below would otherwise misfire on "PLAYER **to** leave".
+  //
+  // "quitte X pour Y" is the French equivalent of the same construction
+  // (L'Équipe's mercato feed — see rss.ts's 'mercato' keyword) and is
+  // handled here rather than as bare entries in TO_PREPOSITIONS/
+  // FROM_PREPOSITIONS: a standalone 'pour' cue is too common a word to be a
+  // safe generic destination marker, but paired with 'quitte' as the origin
+  // marker (same bounded-window structure as the English case) it's as
+  // precise as "leave X for Y" already is.
   const leaveIdx = lower.search(/\bleaves?\b/)
-  if (leaveIdx !== -1) {
-    const forIdx = lower.indexOf(' for ', leaveIdx)
-    if (forIdx !== -1 && forIdx - leaveIdx < 80) {
-      const leaveClub = findBestClub(text.slice(leaveIdx, forIdx), candidateClubs)
-      const forClub = findBestClub(text.slice(forIdx + 5, forIdx + 5 + 40), candidateClubs)
+  const quitteIdx = lower.search(/\bquitte(nt)?\b/)
+  const originIdx = leaveIdx !== -1 ? leaveIdx : quitteIdx
+  const destMarker = leaveIdx !== -1 ? ' for ' : ' pour '
+  if (originIdx !== -1) {
+    const forIdx = lower.indexOf(destMarker, originIdx)
+    if (forIdx !== -1 && forIdx - originIdx < 80) {
+      const leaveClub = findBestClub(text.slice(originIdx, forIdx), candidateClubs)
+      const forClub = findBestClub(text.slice(forIdx + destMarker.length, forIdx + destMarker.length + 40), candidateClubs)
       if (leaveClub) fromClub = { id: leaveClub.id, name: leaveClub.name, score: leaveClub.score }
       if (forClub) toClub = { id: forClub.id, name: forClub.name, score: forClub.score }
     }
