@@ -41,6 +41,14 @@ nine unauthenticated `/admin/*` routes are out of this task's stated scope
 ("do not touch unrelated backend files") and remain a known gap, restated
 below.
 
+**Update 2026-08-15**: the above describes state at the time this audit was
+written. All nine were subsequently closed (`docs/polp-security-dev-plan.md`
+Phase 1) — every `/admin/*` route now requires `requireAdmin`, router-wide.
+Verified live 2026-08-16 (`curl`, no cookie → 401 on all five previously-open
+routes). §2/§4's file lists and the "9 unauthenticated" figure elsewhere in
+this document describe the pre-Phase-1 state and are left as historical
+record rather than rewritten.
+
 **Jobs**: BullMQ (`queue/`), Redis-backed via `ioredis`, already running
 five queues (`ingest`, `score`, `dedupe`, `enrich`, `player-sync`) with
 `upsertJobScheduler` for recurring work — this is the mechanism Phase 4's

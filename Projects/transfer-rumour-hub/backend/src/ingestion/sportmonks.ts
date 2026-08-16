@@ -1,33 +1,64 @@
 /**
  * Sportmonks Transfer Rumours API integration.
- * Docs: https://docs.sportmonks.com/football/endpoints-and-entities/endpoints/transfers
+ * Docs: https://docs.sportmonks.com/football/endpoints-and-entities/endpoints/transfers/get-latest-transfers
  *
  * Set SPORTMONKS_API_KEY in .env. If the key is absent the module falls back
  * to returning stub data so development works offline.
+ *
+ * 2026-08-16: this integration had never actually worked against a real
+ * response — fixed three independent bugs found by hitting the live API
+ * directly (docs.sportmonks.com's page content doesn't include field-level
+ * detail, only the per-endpoint sub-page does):
+ *   1. Wrong endpoint — `/transfers` returns the entire historical dataset
+ *      with no recency bound; `/transfers/latest` is the actual "give me
+ *      recent activity" endpoint this function's name (fetchLatestRumours)
+ *      always claimed to use.
+ *   2. Wrong filter param — `filter[type]=rumour` 400s ("Filters should be
+ *      passed as a string", code 5010): Sportmonks v3 filters are a single
+ *      `filters=name:value` string param, not bracket-object notation, and
+ *      there is no "rumour" filter on this endpoint at all — "rumour vs
+ *      confirmed" isn't a server-side filter, it's the `completed` boolean
+ *      field on each row (already read by normalize() below). No filter
+ *      param is sent now; downstream dedup (workers.ts's
+ *      upsertNormalizedRumour) already tolerates repeat fetches.
+ *   3. Wrong response schema — the real shape has no `transfer`/`type`
+ *      fields (neither is used by normalize() below) and pagination is
+ *      cursor-style (`has_more: boolean`, no `last_page`) — the old schema
+ *      would have rejected every real response via SportmonksResponseSchema
+ *      .parse() even with the filter/endpoint bugs fixed.
  */
 
 import axios, { type AxiosInstance } from 'axios'
 import { z } from 'zod'
 
 // ─── Provider response shape ───────────────────────────────────────────────
+// Verified against a live response 2026-08-16, not guessed — extra fields
+// Sportmonks might add later are ignored by Zod's default (non-strict)
+// object parsing, so this only breaks if a field normalize() reads gets
+// renamed or removed.
 
 const SportmonksTransferSchema = z.object({
   id: z.number(),
   player_id: z.number(),
   from_team_id: z.number(),
   to_team_id: z.number(),
-  transfer: z.boolean(),
-  type: z.enum(['transfer', 'loan', 'free']),
   date: z.string().nullable(),
   career_ended: z.boolean(),
   completed: z.boolean(),
   amount: z.number().nullable(),
 })
 
-const SportmonksResponseSchema = z.object({
+export const SportmonksResponseSchema = z.object({
   data: z.array(SportmonksTransferSchema),
-  pagination: z.object({ current_page: z.number(), last_page: z.number() }).optional(),
+  pagination: z.object({ has_more: z.boolean() }).optional(),
 })
+
+// Hard cap, not just a courtesy — `/transfers/latest` has no natural end
+// (has_more can stay true indefinitely on an active feed), and this runs
+// every RUMOUR_INGEST_INTERVAL_MINUTES. 5 pages × 50/page = 250 of the
+// most recent transfers per run is enough to catch up quickly after
+// downtime without ever risking an unbounded fetch loop.
+const MAX_PAGES = 5
 
 export type SportmonksTransfer = z.infer<typeof SportmonksTransferSchema>
 
@@ -67,7 +98,7 @@ function guessWindow(date: Date): NormalizedRumour['window'] {
   return month >= 6 && month <= 8 ? 'SUMMER' : 'WINTER'
 }
 
-function normalize(raw: SportmonksTransfer): NormalizedRumour {
+export function normalize(raw: SportmonksTransfer): NormalizedRumour {
   const date = raw.date ? new Date(raw.date) : new Date()
   return {
     externalId: `sm-${raw.id}`,
@@ -112,13 +143,13 @@ export async function fetchLatestRumours(): Promise<NormalizedRumour[]> {
   const results: NormalizedRumour[] = []
   let page = 1
 
-  while (true) {
-    const { data: response } = await client.get('/transfers', {
-      params: { page, per_page: 50, 'filter[type]': 'rumour' },
+  while (page <= MAX_PAGES) {
+    const { data: response } = await client.get('/transfers/latest', {
+      params: { page, per_page: 50 },
     })
     const parsed = SportmonksResponseSchema.parse(response)
     results.push(...parsed.data.map(normalize))
-    if (!parsed.pagination || page >= parsed.pagination.last_page) break
+    if (!parsed.pagination?.has_more) break
     page++
   }
 

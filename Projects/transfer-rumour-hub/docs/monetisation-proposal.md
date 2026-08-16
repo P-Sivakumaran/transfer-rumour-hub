@@ -282,14 +282,13 @@ full design rationale of what changed.
   count-check + insert, `services/watchlistService.ts`) — verified with a
   real-concurrency test (`services/watchlistService.integration.test.ts`)
   that was confirmed to fail without the fix before being considered done.
-- **~~`/admin/*` routes have no authentication~~ — partially closed.** The
-  entitlement-grant route now requires an authenticated `ADMIN`-role user
+- **~~`/admin/*` routes have no authentication~~ — closed.** The
+  entitlement-grant route requires an authenticated `ADMIN`-role user
   (`requireAdmin`, `docs/admin-operations.md`) instead of the shared-secret
   `ADMIN_TOKEN`, which has been **retired entirely**, not kept as a
-  fallback. The other nine `/admin/*` routes remain unauthenticated — still
-  a real gap, restated in `docs/public-beta-readiness-audit.md` — but
-  closing them is now a small follow-up (the `requireAdmin` primitive
-  exists) rather than a redesign.
+  fallback. As of 2026-08-15 the remaining nine `/admin/*` routes are gated
+  too (`docs/polp-security-dev-plan.md` Phase 1, router-wide
+  `requireAdmin`) — verified live 2026-08-16.
 - **~~Research tier has no real API-key system~~ — closed.** Real API-key
   auth (`apiKeys/`), separate from the browser cookie session — see
   `docs/research-api.md`. Keys are scoped (`RESEARCH_READ`/

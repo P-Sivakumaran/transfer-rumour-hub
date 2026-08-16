@@ -78,13 +78,12 @@ alerting wired to it in this implementation.
 
 ## What's still unauthenticated
 
-Every other route under `/admin/*` (`/admin/rumours/:id/outcome`,
-`/admin/sources`, `/admin/players/:id/enrich`, `/admin/players/sync`,
-`/admin/rumours`) has **no authentication at all** — a pre-existing gap in
-this codebase, not introduced or fixed by this task (explicitly out of
-scope: "do not touch unrelated backend files"). `requireAdmin` now exists
-and is a drop-in fit for those routes; closing this gap is a small,
-well-scoped follow-up, not a redesign.
+**Closed 2026-08-15** (`docs/polp-security-dev-plan.md` Phase 1): the five
+routes that used to have no authentication at all
+(`/admin/rumours/:id/outcome`, `/admin/sources`, `/admin/players/:id/enrich`,
+`/admin/players/sync`, `/admin/rumours`) now sit behind a router-wide
+`router.use(requireAdmin(adminDb))`, same as every other `/admin/*` route.
+Verified live 2026-08-16: all five return 401 with no session cookie.
 
 ## Rate limiting and its failure mode
 
@@ -101,4 +100,9 @@ closed is the safer default here specifically.
 - No role-change HTTP endpoint (`role` can only be set via
   `BOOTSTRAP_ADMIN_EMAIL` or a direct database write).
 - No UI for any of this — every operation above is a raw HTTP call.
-- The nine unauthenticated `/admin/*` routes listed above.
+- DB role separation (app runtime vs. migration vs. read-only credentials)
+  is planned but not executed — `docs/polp-security-dev-plan.md` Phase 3,
+  files-only, requires explicit sign-off before touching the live DB.
+- Workers still run in-process with the API server, same DB credentials —
+  named future work (`docs/polp-security-dev-plan.md` Phase 4), not
+  scheduled.
