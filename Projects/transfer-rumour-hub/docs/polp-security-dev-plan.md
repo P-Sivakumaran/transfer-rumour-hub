@@ -56,22 +56,43 @@ not a new mechanism. Backend sends it via `axios` headers in
 dependency. Cheap, and removes reliance on network topology (prod deploy
 config is unknown/unverified) as the only control.
 
-## Phase 3 — DB role separation (plan only — do NOT execute without sign-off)
+## Phase 3 — DB role separation (executed 2026-08-17)
 
-Per [[feedback_transfer_hub_no_wipe]]: no disruptive DB changes while the
-user is browsing the live app. This phase is delivered as **files only**:
+Two new roles created and verified against the live `transfer_hub` DB
+(`backend/prisma/roles.sql`, idempotent GRANTs, re-runnable):
 
-- `backend/prisma/roles.sql` (new): `CREATE ROLE app_runtime` (DML only, no
-  DDL, no `DROP`/`ALTER`), separate `CREATE ROLE app_migrator` (owns schema,
-  used only for `prisma migrate deploy`).
-- `.env.example` updated with `DATABASE_URL` (runtime, `app_runtime`) and
-  `MIGRATE_DATABASE_URL` (`app_migrator`) — Prisma supports a separate
-  migration connection string.
-- `train_forecast.py` gets a third, read-only role (`app_readonly`) — it
-  only runs `SELECT`.
-- Actually running the `CREATE ROLE`/`REVOKE`/`GRANT` statements against the
-  live DB, and swapping `DATABASE_URL`, requires explicit go-ahead — this
-  changes what the running dev server can do mid-session.
+- `transfer_hub_runtime` — DML only (`SELECT`/`INSERT`/`UPDATE`/`DELETE`),
+  no `CREATE`/`DROP`/`ALTER`. Intended for `DATABASE_URL` — the API server +
+  BullMQ workers.
+- `transfer_hub_readonly` — `SELECT` only. Intended for
+  `ml-service/app/forecasting/train_forecast.py`'s raw `SELECT` (set
+  `DATABASE_URL` to this role's connection string only when running that
+  script, it's not wired into any `.env`).
+- Migrations deliberately keep using the existing `user` role rather than a
+  new `app_migrator` — `prisma migrate dev` needs `CREATEDB` for its shadow
+  DB, which would make a dedicated migrator role nearly as powerful as the
+  superuser anyway for a command that's run manually, not by a network-facing
+  process. `MIGRATE_DATABASE_URL` in `.env.example` documents the override
+  (`DATABASE_URL="$MIGRATE_DATABASE_URL" npm run migrate`) — not auto-read
+  by anything, a manual convention.
+- Real bug found and fixed during verification: this instance runs
+  **Postgres 14**, where `public` schema grants `CREATE` to the `PUBLIC`
+  pseudo-role by default (fixed only in PG15+). Without an explicit
+  `REVOKE CREATE ON SCHEMA public FROM PUBLIC`, `transfer_hub_runtime` could
+  `CREATE TABLE` despite never being granted that — confirmed empirically
+  (`CREATE TABLE polp_test (id int);` succeeded before the revoke, denied
+  after). `roles.sql` now revokes it.
+- This Postgres instance is shared across unrelated projects on this
+  machine (`polp_security` owned by role `polp`, `financial_suite` owned by
+  `financial_user`, `crypto_db`, `resumemaster`) — confirmed neither
+  pre-existing role/DB was touched; new roles are `transfer_hub_`-prefixed
+  and scoped to the `transfer_hub` database only.
+- **Not yet done**: swapping `backend/.env`'s live `DATABASE_URL` to
+  `transfer_hub_runtime` and restarting the API server. The roles exist and
+  are verified correct, but the currently-running dev server (PID at time of
+  writing: check `lsof -i :3001`) still holds a superuser connection until
+  restarted — deliberately left for the user to do (or ask Claude to do) at
+  a moment that doesn't interrupt an in-progress session.
 
 ## Phase 4 — named future work (not implemented, not scheduled)
 
