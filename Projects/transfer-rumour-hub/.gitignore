@@ -10,3 +10,4 @@ build/
 prisma/dev.db
 *.sqlite
 *.tsbuildinfo
+.chap/

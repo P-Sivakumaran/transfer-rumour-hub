@@ -1,0 +1,10 @@
+{
+  "name": "chap-tooling",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Local CHAP coordinator + MCP server for decision attestation (pilot). Not part of the app workspaces.",
+  "dependencies": {
+    "@brightbeamai/chap-coordinator": "^0.2.10",
+    "@brightbeamai/chap-coordinator-mcp": "^0.2.11"
+  }
+}
