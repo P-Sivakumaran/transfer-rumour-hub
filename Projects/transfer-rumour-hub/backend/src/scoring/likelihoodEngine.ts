@@ -37,6 +37,8 @@ export interface ScoringInputs {
 export interface ScoringOutput {
   /** Final 0–100 likelihood score */
   score: number
+  /** Which path produced this score — "ml" only when ML_SCORING_URL actually answered */
+  source: 'heuristic' | 'ml'
   /** Breakdown of each component's contribution for explainability */
   breakdown: {
     source: number
@@ -122,6 +124,7 @@ function heuristicScore(inputs: ScoringInputs): ScoringOutput {
 
   return {
     score,
+    source: 'heuristic',
     breakdown: {
       source: Math.round(source),
       contract: Math.round(contract),
@@ -148,11 +151,11 @@ export async function computeScore(inputs: ScoringInputs): Promise<ScoringOutput
   }
 
   try {
-    const { data } = await axios.post<ScoringOutput>(ML_SCORING_URL, inputs, {
+    const { data } = await axios.post<Omit<ScoringOutput, 'source'>>(ML_SCORING_URL, inputs, {
       timeout: ML_SCORING_TIMEOUT_MS,
       headers: ML_SERVICE_KEY ? { 'X-ML-Service-Key': ML_SERVICE_KEY } : undefined,
     })
-    return data
+    return { ...data, source: 'ml' }
   } catch {
     return heuristicScore(inputs)
   }

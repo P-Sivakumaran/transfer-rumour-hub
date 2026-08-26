@@ -331,7 +331,7 @@ async function processScore(job: { data: ScoreJobData }) {
     ? (contractEnd.getTime() - now.getTime()) / (1000 * 60 * 60 * 24 * 30.44)
     : null
 
-  const { score } = await computeScore({
+  const scoringInputs = {
     sourceReliability: rumour.source?.reliabilityScore ?? 0.5,
     monthsToContractExpiry: monthsToExpiry,
     reportedFeeMin: rumour.reportedFeeMin,
@@ -340,7 +340,9 @@ async function processScore(job: { data: ScoreJobData }) {
     clubNeedScore: 0.6,
     distinctSourceCount: rumour.distinctSourceCount,
     baseProbability: rumour.baseProbability,
-  })
+  }
+
+  const { score, source: scoreSource } = await computeScore(scoringInputs)
 
   const newStatus: RumourStatus = score >= 70 ? RumourStatus.HOT : RumourStatus.PENDING
 
@@ -350,6 +352,9 @@ async function processScore(job: { data: ScoreJobData }) {
   })
   await prisma.rumourHistory.create({
     data: { rumourId: rumour.id, computedLikelihood: score, status: newStatus },
+  })
+  await prisma.scoringSnapshot.create({
+    data: { rumourId: rumour.id, ...scoringInputs, score, scoreSource },
   })
 
   broadcast('rumour:updated', { id: rumour.id, computedLikelihood: score, status: newStatus })
