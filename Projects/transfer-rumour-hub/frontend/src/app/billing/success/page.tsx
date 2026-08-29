@@ -37,6 +37,7 @@ function BillingSuccessContent() {
           <p className="text-xl font-semibold text-white">Ads removed. Thanks for the support.</p>
           {/* Full reload, not client navigation — the ad-free cookie needs to
               be picked up by a fresh server render of the feed. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/"
             className="inline-block rounded-lg bg-pitch-500 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-pitch-600"

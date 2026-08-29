@@ -43,10 +43,13 @@ function ReliabilityDots({ score }: { score: number }) {
   )
 }
 
+const CURRENCY_SYMBOLS: Record<string, string> = { EUR: '€', GBP: '£', USD: '$' }
+
 function feeLabel(min: number | null, max: number | null, currency: string): string {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? `${currency} `
   if (min == null && max == null) return 'Undisclosed'
-  if (min != null && max != null) return `€${min}–${max}M`
-  return `€${min ?? max}M`
+  if (min != null && max != null) return `${symbol}${min}–${max}M`
+  return `${symbol}${min ?? max}M`
 }
 
 export default function RumourCard({ rumour, compact = false }: Props) {

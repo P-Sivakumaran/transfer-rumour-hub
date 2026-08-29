@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Graph from 'graphology'
 import Sigma from 'sigma'
 import forceAtlas2 from 'graphology-layout-forceatlas2'
@@ -63,7 +63,6 @@ export default function TransferGraph() {
   const [initError, setInitError] = useState<string | null>(null)
   const [hovered, setHovered] = useState<HoveredNode | null>(null)
   const [filter, setFilter] = useState<'all' | 'HOT' | 'PENDING' | 'COMPLETED'>('all')
-  const [running, setRunning] = useState(true)
 
   // Fetch graph data
   useEffect(() => {
@@ -172,17 +171,6 @@ export default function TransferGraph() {
       sigmaRef.current = null
     }
   }, [data, filter])
-
-  const toggleLayout = useCallback(() => {
-    if (!graphRef.current || !sigmaRef.current) return
-    if (running) {
-      setRunning(false)
-    } else {
-      forceAtlas2.assign(graphRef.current, { iterations: 50 })
-      sigmaRef.current.refresh()
-      setRunning(true)
-    }
-  }, [running])
 
   if (initError) {
     return (

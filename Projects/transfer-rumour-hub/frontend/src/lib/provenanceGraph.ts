@@ -10,7 +10,7 @@
  * simulation — appropriate for a progressive-disclosure investigation view
  * with at most a few dozen nodes, not a full transfer-market network.
  */
-import type { ClaimDetail, EvidenceItemData } from '@/types'
+import type { ClaimDetail } from '@/types'
 import { isRoot } from './evidenceCategories'
 
 export type GraphNodeType = 'claim' | 'source' | 'evidence' | 'club' | 'player'
