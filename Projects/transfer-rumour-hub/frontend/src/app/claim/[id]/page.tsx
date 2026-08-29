@@ -9,9 +9,11 @@ import ForecastHistoryChart from '@/components/ForecastHistoryChart'
 import ProvenanceGraph from '@/components/ProvenanceGraph'
 import type { ClaimDetail, ForecastDisplayData, ForecastHistoryPoint, EntitlementDenial } from '@/types'
 
-export default async function ClaimDetailPage({ params }: { params: { id: string } }) {
-  const id = parseInt(params.id, 10)
-  const cookie = cookies().toString()
+export default async function ClaimDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await params
+  const id = parseInt(rawId, 10)
+  const cookieStore = await cookies()
+  const cookie = cookieStore.toString()
   const claim = await api.claims.get(id, cookie).catch(() => null)
   if (!claim) notFound()
 

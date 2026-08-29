@@ -1,7 +1,4 @@
-import dynamic from 'next/dynamic'
-
-// Sigma requires window — load client-side only
-const TransferGraph = dynamic(() => import('@/components/network/TransferGraph'), { ssr: false })
+import TransferGraphClient from '@/components/network/TransferGraphClient'
 
 export default function NetworkPage() {
   return (
@@ -13,7 +10,7 @@ export default function NetworkPage() {
           Node size = market value · Edge thickness = likelihood · Edge color = status.
         </p>
       </div>
-      <TransferGraph />
+      <TransferGraphClient />
     </div>
   )
 }

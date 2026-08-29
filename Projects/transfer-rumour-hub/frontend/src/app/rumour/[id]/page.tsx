@@ -5,8 +5,9 @@ import TruthMeter from '@/components/TruthMeter'
 import TimelineChart from '@/components/TimelineChart'
 import { resolveDisplayOrigin } from '@/lib/rumourOrigin'
 
-export default async function RumourDetailPage({ params }: { params: { id: string } }) {
-  const id = parseInt(params.id, 10)
+export default async function RumourDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await params
+  const id = parseInt(rawId, 10)
   const rumour = await api.rumours.get(id).catch(() => null)
   if (!rumour) notFound()
 

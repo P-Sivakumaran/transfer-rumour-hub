@@ -6,10 +6,10 @@ import WatchlistButton from '@/components/WatchlistButton'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
-async function isWatched(playerId: number): Promise<boolean> {
-  if (!cookies().get('token')) return false
+async function isWatched(playerId: number, cookieHeader: string): Promise<boolean> {
+  if (!cookieHeader) return false
   const res = await fetch(`${BASE}/watchlist`, {
-    headers: { Cookie: cookies().toString() },
+    headers: { Cookie: cookieHeader },
     cache: 'no-store',
   })
   if (!res.ok) return false
@@ -17,13 +17,15 @@ async function isWatched(playerId: number): Promise<boolean> {
   return items.some((i) => i.playerId === playerId)
 }
 
-export default async function PlayerPage({ params }: { params: { id: string } }) {
-  const id = parseInt(params.id, 10)
+export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: rawId } = await params
+  const id = parseInt(rawId, 10)
   const player = await api.players.get(id).catch(() => null)
   if (!player) notFound()
 
-  const authenticated = !!cookies().get('token')
-  const watched = await isWatched(id)
+  const cookieStore = await cookies()
+  const authenticated = !!cookieStore.get('token')
+  const watched = await isWatched(id, cookieStore.toString())
 
   const contractEnd = player.contractEnd
     ? new Date(player.contractEnd).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })

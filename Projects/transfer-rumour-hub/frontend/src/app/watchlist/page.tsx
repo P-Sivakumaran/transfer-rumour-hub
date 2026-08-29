@@ -7,7 +7,7 @@ import type { PaginatedResponse, Rumour } from '@/types'
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
 export default async function WatchlistPage() {
-  const cookieStore = cookies()
+  const cookieStore = await cookies()
   if (!cookieStore.get('token')) redirect('/login')
 
   const res = await fetch(`${BASE}/rumours?watchlist=true&limit=50`, {

@@ -15,21 +15,27 @@ interface SearchParams {
   page?: string
 }
 
-export default async function HomePage({ searchParams }: { searchParams: SearchParams }) {
-  const page = parseInt(searchParams.page ?? '1', 10)
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<SearchParams>
+}) {
+  const resolvedSearchParams = await searchParams
+  const page = parseInt(resolvedSearchParams.page ?? '1', 10)
 
   const { data: rumours, total, limit } = await api.rumours.list({
-    league: searchParams.league,
-    position: searchParams.position,
-    status: searchParams.status as RumourStatus | undefined,
-    window: searchParams.window as TransferWindow | undefined,
+    league: resolvedSearchParams.league,
+    position: resolvedSearchParams.position,
+    status: resolvedSearchParams.status as RumourStatus | undefined,
+    window: resolvedSearchParams.window as TransferWindow | undefined,
     page,
     limit: 20,
   })
 
   const stats = await api.stats.overview()
   const totalPages = Math.ceil(total / limit)
-  const adsEnabled = !cookies().get('ads_removed')
+  const cookieStore = await cookies()
+  const adsEnabled = !cookieStore.get('ads_removed')
 
   return (
     <div className="space-y-8">
