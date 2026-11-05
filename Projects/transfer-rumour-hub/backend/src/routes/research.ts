@@ -3,12 +3,20 @@ import { PrismaClient } from '@prisma/client'
 import { requireApiKey } from '../apiKeys/middleware.js'
 import type { ApiKeyDb, ApiKeyUsageDb } from '../apiKeys/db.js'
 import type { OperationalEventDb } from '../analytics/operationalEvents.js'
+import { rateLimitMiddleware } from '../lib/rateLimit.js'
 import { handleHistoricalClaims, handleEvidenceMetadata } from '../controllers/researchController.js'
 
 const prisma = new PrismaClient()
 const db = prisma as unknown as ApiKeyDb & ApiKeyUsageDb & OperationalEventDb
 
 const router = Router()
+
+const ipLimit = rateLimitMiddleware({
+  keyFn: (req) => `research:ip:${req.ip ?? 'unknown'}`,
+  limit: 300,
+  windowSeconds: 60,
+  failureMode: 'OPEN',
+})
 
 // API-key authenticated, not cookie-session — this replaces the
 // requireAuth + requireEntitlement gate these routes used before Research
@@ -19,11 +27,13 @@ const router = Router()
 // now, not a browser one.
 router.get(
   '/historical-claims',
+  ipLimit,
   requireApiKey(db, { scope: 'RESEARCH_READ', featureKey: 'HISTORICAL_DATASETS', endpointCategory: 'HISTORICAL_CLAIMS' }),
   handleHistoricalClaims,
 )
 router.get(
   '/evidence-metadata',
+  ipLimit,
   requireApiKey(db, { scope: 'RESEARCH_EXPORT', featureKey: 'PROVENANCE_BULK_EXPORT', endpointCategory: 'EVIDENCE_METADATA' }),
   handleEvidenceMetadata,
 )
