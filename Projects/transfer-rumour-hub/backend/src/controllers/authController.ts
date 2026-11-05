@@ -4,6 +4,9 @@ import jwt from 'jsonwebtoken'
 import { createUser, findUserByEmail, verifyCredentials, getUserById } from '../services/authService.js'
 import type { AuthedRequest } from '../middleware/auth.js'
 
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  throw new Error('JWT_SECRET must be set in production')
+}
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-me'
 
 const COOKIE_OPTS = {
