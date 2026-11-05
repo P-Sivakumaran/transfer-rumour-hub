@@ -51,7 +51,7 @@ router.patch('/rumours/:id/outcome', async (req, res) => {
   if (isNaN(id)) { res.status(400).json({ error: 'Invalid id' }); return }
 
   const parsed = outcomeSchema.safeParse(req.body)
-  if (!parsed.success) { res.status(400).json({ error: 'Invalid body', details: parsed.error.errors }); return }
+  if (!parsed.success) { res.status(400).json({ error: 'Invalid body', details: parsed.error.issues }); return }
 
   await applyOutcome(id, parsed.data.status, prisma, true)
 
@@ -159,7 +159,7 @@ router.post(
     const parsed = entitlementSchema.safeParse(req.body)
     if (!parsed.success) {
       await logOperationalEvent(opDb, { eventType: 'ADMIN_TIER_GRANT_FAILURE', reason: 'INVALID_TIER' }, correlationId)
-      res.status(400).json({ error: 'Invalid body', details: parsed.error.errors })
+      res.status(400).json({ error: 'Invalid body', details: parsed.error.issues })
       return
     }
 
